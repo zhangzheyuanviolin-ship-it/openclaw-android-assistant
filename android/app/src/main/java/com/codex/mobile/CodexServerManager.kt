@@ -394,12 +394,14 @@ WEOF
     }
 
     /**
-     * Run `codex login --device-auth` using the CONNECT proxy.
-     * Parses the output for the device URL and code and calls [onDeviceCode]
-     * so the UI can display them. Blocks until the login completes or fails.
+     * Run `codex login` (URL-based OAuth flow) using the CONNECT proxy.
+     * The native binary starts a local HTTP server for the OAuth callback,
+     * prints an auth URL, and waits for the redirect. Parses the URL from
+     * stdout and calls [onLoginUrl] so the Activity can open the browser.
+     * Blocks until login completes or fails.
      */
-    fun loginWithDeviceAuth(
-        onDeviceCode: (url: String, code: String) -> Unit,
+    fun loginWithUrl(
+        onLoginUrl: (url: String) -> Unit,
         onProgress: (String) -> Unit,
     ): Boolean {
         val paths = BootstrapInstaller.getPaths(context)
@@ -407,7 +409,7 @@ WEOF
         env["HTTPS_PROXY"] = "http://127.0.0.1:$PROXY_PORT"
         env["HTTP_PROXY"] = "http://127.0.0.1:$PROXY_PORT"
 
-        val pb = ProcessBuilder(codexBinPath(), "login", "--device-auth")
+        val pb = ProcessBuilder(codexBinPath(), "login")
         pb.environment().clear()
         pb.environment().putAll(env)
         pb.directory(File(paths.homeDir))
@@ -417,32 +419,26 @@ WEOF
         val reader = BufferedReader(InputStreamReader(proc.inputStream))
 
         val urlRegex = Regex("""(https://auth\.openai\.com/\S+)""")
-        val codeRegex = Regex("""([A-Z0-9]{4}-[A-Z0-9]{5})""")
-        var foundUrl = ""
-        var foundCode = ""
+        var urlSent = false
 
         var line = reader.readLine()
         while (line != null) {
             val clean = line.replace(Regex("\\x1b\\[[0-9;]*m"), "").trim()
-            Log.d(TAG, "[device-auth] $clean")
+            Log.d(TAG, "[login] $clean")
             onProgress(clean)
 
-            if (foundUrl.isEmpty()) {
-                urlRegex.find(clean)?.let { foundUrl = it.value }
-            }
-            if (foundCode.isEmpty()) {
-                codeRegex.find(clean)?.let { foundCode = it.value }
-            }
-
-            if (foundUrl.isNotEmpty() && foundCode.isNotEmpty()) {
-                onDeviceCode(foundUrl, foundCode)
+            if (!urlSent) {
+                urlRegex.find(clean)?.let {
+                    onLoginUrl(it.value)
+                    urlSent = true
+                }
             }
 
             line = reader.readLine()
         }
 
         val exitCode = proc.waitFor()
-        Log.i(TAG, "codex login --device-auth exited with code $exitCode")
+        Log.i(TAG, "codex login exited with code $exitCode")
         return exitCode == 0
     }
 
@@ -462,7 +458,7 @@ WEOF
         env["HTTP_PROXY"] = "http://127.0.0.1:$PROXY_PORT"
 
         val shell = "${paths.prefixDir}/bin/sh"
-        val cmd = "${codexBinPath()} exec \"say hi\" 2>&1"
+        val cmd = "${codexBinPath()} exec --skip-git-repo-check \"say hi\" 2>&1"
 
         val pb = ProcessBuilder(shell, "-c", cmd)
         pb.environment().clear()

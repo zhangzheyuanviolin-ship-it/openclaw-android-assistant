@@ -1,7 +1,5 @@
 package com.codex.mobile
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -14,7 +12,6 @@ import android.webkit.WebViewClient
 import android.widget.EditText
 import android.widget.ProgressBar
 import android.widget.TextView
-import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 
@@ -152,15 +149,17 @@ class MainActivity : AppCompatActivity() {
         // Step 5: Authenticate via `codex login`
         updateStatus("Checking authentication…")
         if (!serverManager.isLoggedIn()) {
-            updateStatus("Login required — starting device auth…")
-            val authOk = serverManager.loginWithDeviceAuth(
-                onDeviceCode = { url, code ->
-                    runOnUiThread { showDeviceCodeDialog(url, code) }
+            updateStatus("Login required — opening browser…")
+            val authOk = serverManager.loginWithUrl(
+                onLoginUrl = { url ->
+                    runOnUiThread {
+                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                    }
                 },
                 onProgress = { msg -> updateDetail(msg) },
             )
             if (!authOk && !serverManager.isLoggedIn()) {
-                updateStatus("Device auth failed — enter API key manually")
+                updateStatus("Browser login failed — enter API key manually")
                 val apiKey = requestApiKey()
                 if (apiKey.isBlank()) {
                     throw RuntimeException("No API key provided")
@@ -203,33 +202,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ── Device auth dialog ──────────────────────────────────────────────────
-
-    private fun showDeviceCodeDialog(url: String, code: String) {
-        val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(ClipData.newPlainText("Codex device code", code))
-        Toast.makeText(this, "Code copied to clipboard", Toast.LENGTH_SHORT).show()
-
-        AlertDialog.Builder(this)
-            .setTitle("Sign in to Codex")
-            .setMessage(
-                "Open the link below in your browser and enter this code:\n\n" +
-                    "Code: $code\n\n" +
-                    "The code has been copied to your clipboard.",
-            )
-            .setPositiveButton("Open Browser") { _, _ ->
-                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-            }
-            .setNeutralButton("Copy Code") { _, _ ->
-                clipboard.setPrimaryClip(ClipData.newPlainText("Codex device code", code))
-                Toast.makeText(this, "Code copied", Toast.LENGTH_SHORT).show()
-            }
-            .setCancelable(false)
-            .show()
-    }
-
     /**
-     * Fallback: prompt for API key if device auth fails.
+     * Fallback: prompt for API key if browser login fails.
      */
     private fun requestApiKey(): String {
         var result = ""
