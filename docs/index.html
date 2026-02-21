@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Codex App Android — AI Coding Agent on Your Phone</title>
+<meta name="description" content="A self-contained Android APK that runs the full OpenAI Codex CLI with a web UI. No root. No Termux. One APK." />
+<meta property="og:title" content="Codex App Android" />
+<meta property="og:description" content="OpenAI Codex CLI running natively on Android with a full web UI. One APK, zero dependencies." />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://friuns2.github.io/codex-app-android/" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>" />
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{--bg:#0a0a0f;--surface:#13131a;--border:#1e1e2a;--text:#e4e4ef;--muted:#8b8ba0;--accent:#7c3aed;--accent-light:#a78bfa;--green:#22c55e;--code-bg:#1a1a26}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.7;overflow-x:hidden}
+  a{color:var(--accent-light);text-decoration:none}
+  a:hover{text-decoration:underline}
+
+  .hero{text-align:center;padding:6rem 1.5rem 4rem;background:linear-gradient(180deg,#13131a 0%,var(--bg) 100%);position:relative;overflow:hidden}
+  .hero::before{content:'';position:absolute;top:-50%;left:-50%;width:200%;height:200%;background:radial-gradient(ellipse at center,rgba(124,58,237,.08) 0%,transparent 70%);pointer-events:none}
+  .hero h1{font-size:clamp(2.5rem,6vw,4.5rem);font-weight:800;letter-spacing:-.02em;margin-bottom:.5rem;position:relative}
+  .hero h1 .emoji{font-size:.85em}
+  .hero .tagline{font-size:clamp(1.1rem,2.5vw,1.4rem);color:var(--muted);max-width:640px;margin:0 auto 2rem;font-weight:400}
+  .hero .tagline strong{color:var(--text)}
+
+  .badges{display:flex;flex-wrap:wrap;gap:.5rem;justify-content:center;margin-bottom:2.5rem}
+  .badge{display:inline-flex;align-items:center;gap:.4rem;padding:.35rem .75rem;border-radius:6px;font-size:.8rem;font-weight:600;border:1px solid var(--border);background:var(--surface)}
+  .badge .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+  .badge .dot.green{background:var(--green)}
+  .badge .dot.purple{background:var(--accent)}
+  .badge .dot.blue{background:#3b82f6}
+
+  .cta-row{display:flex;gap:1rem;justify-content:center;flex-wrap:wrap}
+  .cta{display:inline-flex;align-items:center;gap:.5rem;padding:.75rem 1.75rem;border-radius:10px;font-weight:600;font-size:1rem;transition:all .2s}
+  .cta-primary{background:var(--accent);color:#fff;border:none}
+  .cta-primary:hover{background:#6d28d9;text-decoration:none}
+  .cta-secondary{background:transparent;color:var(--text);border:1px solid var(--border)}
+  .cta-secondary:hover{border-color:var(--accent);text-decoration:none}
+
+  .section{max-width:900px;margin:0 auto;padding:4rem 1.5rem}
+  .section h2{font-size:1.8rem;font-weight:700;margin-bottom:1.5rem;display:flex;align-items:center;gap:.5rem}
+  .section h2 .emoji{font-size:1.2em}
+
+  .card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1rem}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.5rem}
+  .card h3{font-size:1rem;margin-bottom:.5rem;display:flex;align-items:center;gap:.4rem}
+  .card p{color:var(--muted);font-size:.9rem;line-height:1.6}
+
+  .arch-box{background:var(--code-bg);border:1px solid var(--border);border-radius:12px;padding:1.5rem;overflow-x:auto;margin-top:1rem}
+  .arch-box pre{color:var(--accent-light);font-family:'SF Mono',Monaco,'Cascadia Code',monospace;font-size:.8rem;line-height:1.6;white-space:pre;margin:0}
+
+  .steps{display:flex;flex-direction:column;gap:1rem;counter-reset:step}
+  .step{display:flex;gap:1rem;align-items:flex-start;counter-increment:step}
+  .step-num{width:32px;height:32px;background:var(--accent);color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.85rem;flex-shrink:0;margin-top:.15rem}
+  .step-content h3{font-size:1rem;margin-bottom:.25rem}
+  .step-content p{color:var(--muted);font-size:.9rem}
+
+  .code-block{background:var(--code-bg);border:1px solid var(--border);border-radius:10px;padding:1.25rem;overflow-x:auto;margin:1rem 0}
+  .code-block code{color:var(--green);font-family:'SF Mono',Monaco,monospace;font-size:.85rem;line-height:1.7;white-space:pre}
+  .code-block .comment{color:var(--muted)}
+
+  .table-wrap{overflow-x:auto;margin:1rem 0}
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:.75rem 1rem;text-align:left;border-bottom:1px solid var(--border);font-size:.9rem}
+  th{color:var(--muted);font-weight:600;font-size:.8rem;text-transform:uppercase;letter-spacing:.05em}
+  td:first-child{font-weight:600}
+
+  footer{text-align:center;padding:4rem 1.5rem 3rem;color:var(--muted);font-size:.9rem;border-top:1px solid var(--border);margin-top:2rem}
+  footer strong{color:var(--text)}
+  footer .witty{margin-top:.5rem;font-style:italic}
+
+  @media(max-width:600px){
+    .hero{padding:4rem 1rem 3rem}
+    .section{padding:3rem 1rem}
+    .card-grid{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1><span class="emoji">🤖</span> Codex App Android</h1>
+  <p class="tagline">
+    The full <strong>OpenAI Codex CLI</strong> — running natively on your Android phone.
+    No root. No Termux. <strong>One APK.</strong>
+  </p>
+  <div class="badges">
+    <span class="badge"><span class="dot green"></span> Works on Android 7+</span>
+    <span class="badge"><span class="dot purple"></span> Codex CLI v0.104.0</span>
+    <span class="badge"><span class="dot blue"></span> Node.js 24 + Vue 3</span>
+  </div>
+  <div class="cta-row">
+    <a href="https://github.com/friuns2/codex-app-android" class="cta cta-primary">⭐ View on GitHub</a>
+    <a href="https://github.com/friuns2/codex-app-android#-quick-start" class="cta cta-secondary">⚡ Quick Start</a>
+  </div>
+</div>
+
+<div class="section">
+  <h2><span class="emoji">🤯</span> What Is This?</h2>
+  <p style="font-size:1.05rem;margin-bottom:1rem">
+    OpenAI's Codex CLI is a terminal-based AI coding agent that reads codebases, writes code, and executes commands. It's incredible — but desktop-only.
+  </p>
+  <p style="font-size:1.05rem;margin-bottom:1.5rem">
+    <strong>We put it on Android.</strong> This APK bundles an entire Linux environment, installs Node.js and the native Rust Codex binary, wires up a Vue.js web UI, and serves it all through a WebView. Full AI coding agent in your pocket.
+  </p>
+
+  <div class="card-grid">
+    <div class="card">
+      <h3>💬 Chat Interface</h3>
+      <p>Full conversational UI with streaming responses, reasoning visibility, model selection, and multi-thread sessions.</p>
+    </div>
+    <div class="card">
+      <h3>🦀 Native Binary</h3>
+      <p>73MB Rust binary (aarch64-musl) running natively — not emulated. Full <code>codex app-server</code> with JSON-RPC.</p>
+    </div>
+    <div class="card">
+      <h3>🐧 Embedded Linux</h3>
+      <p>Complete Termux-derived userland with sh, apt, Node.js, npm, SSL certs — extracted from APK assets.</p>
+    </div>
+    <div class="card">
+      <h3>🌐 DNS Proxy Bridge</h3>
+      <p>Node.js CONNECT proxy bridges Android's DNS to the musl binary. No <code>/etc/resolv.conf</code> needed.</p>
+    </div>
+    <div class="card">
+      <h3>🔓 Full Auto-Approval</h3>
+      <p>Pre-configured with <code>approval_policy = "never"</code> and <code>danger-full-access</code> sandbox mode.</p>
+    </div>
+    <div class="card">
+      <h3>🔋 Background Execution</h3>
+      <p>Foreground service + battery optimization exemption keeps the server alive when you switch apps.</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h2><span class="emoji">🏗️</span> Architecture</h2>
+  <div class="arch-box">
+<pre>
+User taps Send
+  → 🖥️ Vue ThreadComposer → useDesktopState → codexGateway
+    → 📡 POST /codex-api/rpc { method: "turn/start" }
+      → 🔌 Express bridge → JSON-RPC stdin → codex app-server
+        → 🦀 Native Rust binary → HTTPS via proxy → OpenAI API
+        → 📤 stdout JSON-RPC notifications (streaming)
+      → 📺 SSE EventSource → live typing in WebView
+</pre>
+  </div>
+  <p style="margin-top:1rem;color:var(--muted)">
+    Four layers: Vue frontend → Express server → JSON-RPC stdio bridge → Native Rust binary. 
+    All running locally on your phone at <code>127.0.0.1:18923</code>.
+  </p>
+</div>
+
+<div class="section">
+  <h2><span class="emoji">⚡</span> Quick Start</h2>
+  <div class="code-block">
+<code><span class="comment"># 🔨 Clone the repo</span>
+git clone https://github.com/friuns2/codex-app-android.git
+cd codex-app-android
+
+<span class="comment"># 📦 Install deps & build frontend</span>
+npm install && npm run build
+
+<span class="comment"># 🐧 Download Termux bootstrap (one-time)</span>
+cd android && bash scripts/download-bootstrap.sh
+
+<span class="comment"># 📱 Bundle, build, install, launch</span>
+bash scripts/build-server-bundle.sh && ./gradlew assembleDebug \
+  && adb install -r app/build/outputs/apk/debug/app-debug.apk \
+  && adb shell am start -n com.codex.mobile/.MainActivity</code>
+  </div>
+</div>
+
+<div class="section">
+  <h2><span class="emoji">🧩</span> Startup Sequence</h2>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-content"><h3>Battery & Service</h3><p>Request Doze exemption, start foreground service with persistent notification.</p></div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-content"><h3>Bootstrap Extraction</h3><p>Extract Termux bootstrap zip into app's private storage. Fix hardcoded paths.</p></div></div>
+    <div class="step"><div class="step-num">3</div><div class="step-content"><h3>Node.js Installation</h3><p>Download and extract Node.js 24 .deb packages from Termux repos via apt-get.</p></div></div>
+    <div class="step"><div class="step-num">4</div><div class="step-content"><h3>Codex CLI + Web UI</h3><p>Extract pre-built server bundle from APK. Install native Rust binary from npm registry.</p></div></div>
+    <div class="step"><div class="step-num">5</div><div class="step-content"><h3>Config & Proxy</h3><p>Write full-access config. Start Node.js CONNECT proxy for DNS/TLS bridging.</p></div></div>
+    <div class="step"><div class="step-num">6</div><div class="step-content"><h3>Auth & Launch</h3><p>OAuth via browser → health check → start Express server → load WebView.</p></div></div>
+  </div>
+</div>
+
+<div class="section">
+  <h2><span class="emoji">📊</span> Tech Stack</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Layer</th><th>Technology</th><th>Version</th></tr></thead>
+      <tbody>
+        <tr><td>🤖 AI Engine</td><td>OpenAI Codex CLI</td><td>0.104.0</td></tr>
+        <tr><td>🦀 Native Binary</td><td>Rust (musl, aarch64)</td><td>—</td></tr>
+        <tr><td>🟢 Runtime</td><td>Node.js (Termux)</td><td>24.13.0</td></tr>
+        <tr><td>🌐 Frontend</td><td>Vue.js 3 + Vite + Tailwind</td><td>3.x</td></tr>
+        <tr><td>🔌 Backend</td><td>Express + JSON-RPC bridge</td><td>—</td></tr>
+        <tr><td>📱 Android</td><td>Kotlin + WebView</td><td>2.1.0</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<footer>
+  <strong>Built by shoving an entire Linux distro into an APK and refusing to give up</strong> 🔬
+  <div class="witty">They said "just use SSH to your server." We said "no." 😏</div>
+</footer>
+
+</body>
+</html>
