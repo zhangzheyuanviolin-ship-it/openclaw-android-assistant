@@ -114,6 +114,9 @@
                 <p v-else class="message-text">
                   <template v-for="(segment, index) in parseInlineSegments(message.text)" :key="`seg-${index}`">
                     <span v-if="segment.kind === 'text'">{{ segment.value }}</span>
+                    <a v-else-if="segment.kind === 'link'" class="message-link" :href="segment.url" target="_blank" rel="noopener noreferrer">
+                      {{ segment.label }}
+                    </a>
                     <a v-else-if="segment.kind === 'file'" class="message-file-link" href="#" @click.prevent>
                       {{ segment.displayName }}
                     </a>
@@ -184,6 +187,7 @@ type InlineSegment =
   | { kind: 'text'; value: string }
   | { kind: 'code'; value: string }
   | { kind: 'file'; value: string; displayName: string }
+  | { kind: 'link'; url: string; label: string }
 
 let scrollRestoreFrame = 0
 let bottomLockFrame = 0
@@ -238,7 +242,59 @@ function parseFileReference(value: string): { path: string; line: number | null 
   return { path: pathValue, line }
 }
 
+const LINK_PATTERN = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|\[([^\]]+)\]\(([^)]+)\)|(https?:\/\/[^\s<>)\]]+)/g
+
+function parseLinksInText(text: string): InlineSegment[] {
+  const segments: InlineSegment[] = []
+  let lastIndex = 0
+
+  for (const match of text.matchAll(LINK_PATTERN)) {
+    const matchStart = match.index
+    if (matchStart > lastIndex) {
+      segments.push({ kind: 'text', value: text.slice(lastIndex, matchStart) })
+    }
+
+    if (match[1] && match[2]) {
+      segments.push({ kind: 'link', label: match[1], url: match[2] })
+    } else if (match[3] && match[4]) {
+      const target = match[4]
+      const fileRef = parseFileReference(target)
+      if (fileRef) {
+        const displayName = getBasename(fileRef.path)
+        segments.push({ kind: 'file', value: target, displayName: match[3] })
+      } else {
+        segments.push({ kind: 'text', value: match[3] })
+      }
+    } else if (match[5]) {
+      segments.push({ kind: 'link', label: match[5], url: match[5] })
+    }
+
+    lastIndex = matchStart + match[0].length
+  }
+
+  if (lastIndex < text.length) {
+    segments.push({ kind: 'text', value: text.slice(lastIndex) })
+  }
+
+  return segments.length > 0 ? segments : [{ kind: 'text', value: text }]
+}
+
 function parseInlineSegments(text: string): InlineSegment[] {
+  const codeSegments = parseCodeSegments(text)
+  const result: InlineSegment[] = []
+
+  for (const segment of codeSegments) {
+    if (segment.kind === 'text') {
+      result.push(...parseLinksInText(segment.value))
+    } else {
+      result.push(segment)
+    }
+  }
+
+  return result
+}
+
+function parseCodeSegments(text: string): InlineSegment[] {
   if (!text.includes('`')) return [{ kind: 'text', value: text }]
 
   const segments: InlineSegment[] = []
@@ -793,6 +849,10 @@ onBeforeUnmount(() => {
 
 .message-inline-code {
   @apply rounded-md border border-slate-200 bg-slate-100/60 px-1.5 py-0.5 text-[0.875em] leading-[1.4] text-slate-900 font-mono;
+}
+
+.message-link {
+  @apply text-sm leading-relaxed text-[#0969da] underline underline-offset-2 hover:text-[#1f6feb];
 }
 
 .message-file-link {
