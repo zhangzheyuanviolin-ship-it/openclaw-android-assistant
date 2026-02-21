@@ -89,10 +89,7 @@ class CodexServerManager(private val context: Context) {
         return File(paths.prefixDir, "lib/node_modules/@openai/codex/bin/codex.js").exists()
     }
 
-    fun isServerBundleInstalled(): Boolean {
-        val paths = BootstrapInstaller.getPaths(context)
-        return File(paths.prefixDir, "lib/node_modules/codex-web-local/dist-cli/index.js").exists()
-    }
+    fun isServerBundleInstalled(): Boolean = false
 
     /**
      * The native Rust binary that the JS launcher delegates to.
@@ -216,6 +213,7 @@ WEOF
             val assetFiles = context.assets.list("server-bundle") ?: emptyArray()
             if (assetFiles.isNotEmpty()) {
                 onProgress("Installing server bundle from APK…")
+                targetDir.deleteRecursively()
                 targetDir.mkdirs()
                 extractAssetDir("server-bundle", targetDir)
                 Log.i(TAG, "Server bundle extracted to $targetDir")
