@@ -10,16 +10,21 @@ import java.net.URL
 
 /**
  * Manages the lifecycle of the Node.js codex-web-local server process running
- * inside the Termux bootstrap environment.
+ * inside the Termux bootstrap environment. Handles installation of Node.js,
+ * Codex CLI, the platform-specific native binary, authentication via
+ * `codex login`, and the codex-web-local web server.
  */
 class CodexServerManager(private val context: Context) {
 
     companion object {
         private const val TAG = "CodexServerManager"
         const val SERVER_PORT = 18923
+        private const val PROXY_PORT = 18924
+        private const val CODEX_VERSION = "0.104.0"
     }
 
     private var serverProcess: Process? = null
+    private var proxyProcess: Process? = null
 
     val isRunning: Boolean
         get() {
@@ -32,18 +37,18 @@ class CodexServerManager(private val context: Context) {
             }
         }
 
+    // ── Shell helpers ──────────────────────────────────────────────────────
+
     /**
      * Run a shell command inside the Termux prefix environment.
-     * Returns the exit code. Stdout/stderr are logged and optionally streamed
-     * to the [onOutput] callback.
+     * Returns the exit code.
      */
     fun runInPrefix(
         command: String,
-        apiKey: String? = null,
         onOutput: ((String) -> Unit)? = null,
     ): Int {
         val paths = BootstrapInstaller.getPaths(context)
-        val env = buildEnvironment(paths, apiKey)
+        val env = buildEnvironment(paths)
 
         val shell = "${paths.prefixDir}/bin/sh"
         val pb = ProcessBuilder(shell, "-c", command)
@@ -64,40 +69,51 @@ class CodexServerManager(private val context: Context) {
     }
 
     /**
-     * Check if Node.js is installed in the prefix.
+     * Run a command and capture its stdout as a single trimmed string.
      */
+    private fun runCapture(command: String): String {
+        val sb = StringBuilder()
+        runInPrefix(command) { sb.appendLine(it) }
+        return sb.toString().trim()
+    }
+
+    // ── Install checks ─────────────────────────────────────────────────────
+
     fun isNodeInstalled(): Boolean {
         val paths = BootstrapInstaller.getPaths(context)
         return File(paths.prefixDir, "bin/node").exists()
     }
 
-    /**
-     * Check if codex CLI is installed globally.
-     */
     fun isCodexInstalled(): Boolean {
         val paths = BootstrapInstaller.getPaths(context)
-        return File(paths.prefixDir, "bin/codex").exists()
+        return File(paths.prefixDir, "lib/node_modules/@openai/codex/bin/codex.js").exists()
     }
 
-    /**
-     * Check if codex-web-local server bundle is installed.
-     */
     fun isServerBundleInstalled(): Boolean {
         val paths = BootstrapInstaller.getPaths(context)
-        val serverEntry = File(paths.prefixDir, "lib/node_modules/codex-web-local/dist-cli/index.js")
-        return serverEntry.exists()
+        return File(paths.prefixDir, "lib/node_modules/codex-web-local/dist-cli/index.js").exists()
     }
 
     /**
-     * Install Node.js via the Termux package manager.
+     * The native Rust binary that the JS launcher delegates to.
+     * Required for `codex app-server`, `codex login`, `codex exec`, etc.
      */
+    fun isPlatformBinaryInstalled(): Boolean {
+        val paths = BootstrapInstaller.getPaths(context)
+        return File(
+            paths.prefixDir,
+            "lib/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex/codex",
+        ).exists()
+    }
+
+    // ── Installation ────────────────────────────────────────────────────────
+
     fun installNode(onProgress: (String) -> Unit): Boolean {
         val paths = BootstrapInstaller.getPaths(context)
         val prefix = paths.prefixDir
 
         onProgress("Downloading Node.js packages…")
 
-        // apt-get download + dpkg-deb extract avoids dpkg's hardcoded path issues
         val downloadCmd = """
             cd $prefix/tmp &&
             apt-get update --allow-insecure-repositories 2>&1;
@@ -110,8 +126,6 @@ class CodexServerManager(private val context: Context) {
         }
 
         onProgress("Extracting Node.js packages…")
-        // Debs contain absolute paths under /data/data/com.termux/files/usr/.
-        // Extract to a staging dir then move contents to our prefix.
         val termuxPrefix = "/data/data/com.termux/files/usr"
         val extractCmd = """
             cd $prefix/tmp &&
@@ -136,12 +150,9 @@ class CodexServerManager(private val context: Context) {
         }
 
         onProgress("Fixing script paths…")
-        // Create wrapper scripts that bypass shebang issues
-        // (shebangs like #!/usr/bin/env node don't work without termux-exec)
         val fixCmd = """
             chmod 700 "$prefix/bin/node" 2>/dev/null
 
-            # Create wrapper for codex
             CODEX_JS="$prefix/lib/node_modules/@openai/codex/bin/codex.js"
             if [ -f "${'$'}CODEX_JS" ]; then
                 rm -f "$prefix/bin/codex"
@@ -152,7 +163,6 @@ WEOF
                 chmod 700 "$prefix/bin/codex"
             fi
 
-            # Create wrapper for npm
             NPM_CLI="$prefix/lib/node_modules/npm/bin/npm-cli.js"
             if [ -f "${'$'}NPM_CLI" ]; then
                 rm -f "$prefix/bin/npm"
@@ -170,9 +180,6 @@ WEOF
         return isNodeInstalled()
     }
 
-    /**
-     * Install Codex CLI and codex-web-local via npm.
-     */
     fun installCodex(onProgress: (String) -> Unit): Boolean {
         val paths = BootstrapInstaller.getPaths(context)
         val prefix = paths.prefixDir
@@ -201,10 +208,6 @@ WEOF
         return isCodexInstalled() && isServerBundleInstalled()
     }
 
-    /**
-     * Install the server bundle from APK assets if it's bundled.
-     * Falls back to npm install if no bundle asset exists.
-     */
     fun installServerBundle(onProgress: (String) -> Unit): Boolean {
         val paths = BootstrapInstaller.getPaths(context)
         val targetDir = File(paths.prefixDir, "lib/node_modules/codex-web-local")
@@ -225,37 +228,288 @@ WEOF
         return false
     }
 
-    private fun extractAssetDir(assetPath: String, targetDir: File) {
-        val list = context.assets.list(assetPath) ?: return
-        targetDir.mkdirs()
-        for (entry in list) {
-            val subAsset = "$assetPath/$entry"
-            val subTarget = File(targetDir, entry)
-            val subList = context.assets.list(subAsset)
-            if (subList != null && subList.isNotEmpty()) {
-                subTarget.mkdirs()
-                extractAssetDir(subAsset, subTarget)
-            } else {
-                context.assets.open(subAsset).use { input ->
-                    subTarget.outputStream().use { output ->
-                        input.copyTo(output)
-                    }
+    /**
+     * Install the platform-specific native Codex binary.
+     * npm refuses to install it on android (os mismatch), so we download
+     * the tarball via Node.js and extract it manually.
+     */
+    fun installPlatformBinary(onProgress: (String) -> Unit): Boolean {
+        val paths = BootstrapInstaller.getPaths(context)
+        val prefix = paths.prefixDir
+        val targetPkg = "$prefix/lib/node_modules/@openai/codex-linux-arm64"
+
+        onProgress("Downloading Codex native binary…")
+
+        // Use Node.js (which has working TLS) to download the npm tarball
+        val installCmd = """
+            mkdir -p "$prefix/tmp/_codex_bin" && cd "$prefix/tmp/_codex_bin" &&
+            node -e '
+              const https = require("https");
+              const fs = require("fs");
+              const url = "https://registry.npmjs.org/@openai/codex/-/codex-$CODEX_VERSION-linux-arm64.tgz";
+              const file = fs.createWriteStream("codex-bin.tgz");
+              https.get(url, (res) => {
+                if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+                  https.get(res.headers.location, (r2) => r2.pipe(file).on("finish", () => {
+                    file.close(); console.log("Downloaded"); process.exit(0);
+                  }));
+                } else {
+                  res.pipe(file).on("finish", () => {
+                    file.close(); console.log("Downloaded"); process.exit(0);
+                  });
+                }
+              }).on("error", (e) => { console.error(e.message); process.exit(1); });
+            ' 2>&1 &&
+            tar xzf codex-bin.tgz 2>&1 &&
+            mkdir -p "$targetPkg/vendor/aarch64-unknown-linux-musl/codex" &&
+            cp package/vendor/aarch64-unknown-linux-musl/codex/codex "$targetPkg/vendor/aarch64-unknown-linux-musl/codex/codex" &&
+            cp package/package.json "$targetPkg/package.json" &&
+            chmod 700 "$targetPkg/vendor/aarch64-unknown-linux-musl/codex/codex" &&
+            rm -rf "$prefix/tmp/_codex_bin" &&
+            echo "Platform binary installed"
+        """.trimIndent()
+
+        val code = runInPrefix(installCmd, onOutput = { onProgress(it) })
+        if (code != 0) {
+            Log.e(TAG, "Platform binary install failed with code $code")
+            return false
+        }
+
+        return isPlatformBinaryInstalled()
+    }
+
+    // ── Proxy ────────────────────────────────────────────────────────────────
+
+    /**
+     * Start a Node.js CONNECT proxy so the static-musl codex binary can
+     * resolve DNS and reach HTTPS endpoints. Node.js uses Android's native
+     * resolver; the proxy forwards TCP connections transparently.
+     */
+    fun startProxy(): Boolean {
+        if (proxyProcess != null) return true
+
+        val paths = BootstrapInstaller.getPaths(context)
+        val proxyScript = File(paths.homeDir, "proxy.js")
+
+        // Always overwrite with the latest version from assets
+        try {
+            context.assets.open("proxy.js").use { input ->
+                proxyScript.outputStream().use { output ->
+                    input.copyTo(output)
                 }
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to extract proxy.js asset: ${e.message}")
+            return false
         }
+
+        // Kill any orphaned proxy from a previous run
+        val pidFile = File(paths.homeDir, ".proxy.pid")
+        if (pidFile.exists()) {
+            try {
+                val oldPid = pidFile.readText().trim()
+                ProcessBuilder("kill", oldPid).start().waitFor()
+                Thread.sleep(500)
+            } catch (_: Exception) {}
+            pidFile.delete()
+        }
+
+        val env = buildEnvironment(paths)
+        val shell = "${paths.prefixDir}/bin/sh"
+        val cmd = "exec node ${proxyScript.absolutePath}"
+
+        val pb = ProcessBuilder(shell, "-c", cmd)
+        pb.environment().clear()
+        pb.environment().putAll(env)
+        pb.directory(File(paths.homeDir))
+        pb.redirectErrorStream(true)
+
+        val proc = pb.start()
+        proxyProcess = proc
+
+        Thread {
+            val reader = BufferedReader(InputStreamReader(proc.inputStream))
+            var line = reader.readLine()
+            while (line != null) {
+                Log.d(TAG, "[proxy] $line")
+                line = reader.readLine()
+            }
+            Log.i(TAG, "Proxy exited with code: ${proc.waitFor()}")
+        }.start()
+
+        Thread.sleep(800)
+        Log.i(TAG, "CONNECT proxy started on 127.0.0.1:$PROXY_PORT")
+        return true
+    }
+
+    fun stopProxy() {
+        proxyProcess?.destroy()
+        proxyProcess = null
+    }
+
+    // ── Authentication ──────────────────────────────────────────────────────
+
+    private fun codexBinPath(): String {
+        val paths = BootstrapInstaller.getPaths(context)
+        return "${paths.prefixDir}/lib/node_modules/@openai/codex-linux-arm64" +
+            "/vendor/aarch64-unknown-linux-musl/codex/codex"
+    }
+
+    fun isLoggedIn(): Boolean {
+        val output = runCapture("${codexBinPath()} login status 2>&1")
+        Log.i(TAG, "Login status: $output")
+        return !output.contains("Not logged in", ignoreCase = true)
     }
 
     /**
-     * Start the codex-web-local server in the background.
+     * Pipe an API key into `codex login --with-api-key` via stdin.
      */
-    fun startServer(apiKey: String): Boolean {
+    fun loginWithApiKey(apiKey: String): Boolean {
+        val paths = BootstrapInstaller.getPaths(context)
+        val env = buildEnvironment(paths)
+
+        val pb = ProcessBuilder(codexBinPath(), "login", "--with-api-key")
+        pb.environment().clear()
+        pb.environment().putAll(env)
+        pb.directory(File(paths.homeDir))
+        pb.redirectErrorStream(true)
+
+        val proc = pb.start()
+        proc.outputStream.bufferedWriter().use { w ->
+            w.write(apiKey)
+            w.newLine()
+            w.flush()
+        }
+
+        val reader = BufferedReader(InputStreamReader(proc.inputStream))
+        var line = reader.readLine()
+        while (line != null) {
+            Log.d(TAG, "[login] $line")
+            line = reader.readLine()
+        }
+
+        val exitCode = proc.waitFor()
+        Log.i(TAG, "codex login --with-api-key exited with code $exitCode")
+        return exitCode == 0
+    }
+
+    /**
+     * Run `codex login --device-auth` using the CONNECT proxy.
+     * Parses the output for the device URL and code and calls [onDeviceCode]
+     * so the UI can display them. Blocks until the login completes or fails.
+     */
+    fun loginWithDeviceAuth(
+        onDeviceCode: (url: String, code: String) -> Unit,
+        onProgress: (String) -> Unit,
+    ): Boolean {
+        val paths = BootstrapInstaller.getPaths(context)
+        val env = buildEnvironment(paths).toMutableMap()
+        env["HTTPS_PROXY"] = "http://127.0.0.1:$PROXY_PORT"
+        env["HTTP_PROXY"] = "http://127.0.0.1:$PROXY_PORT"
+
+        val pb = ProcessBuilder(codexBinPath(), "login", "--device-auth")
+        pb.environment().clear()
+        pb.environment().putAll(env)
+        pb.directory(File(paths.homeDir))
+        pb.redirectErrorStream(true)
+
+        val proc = pb.start()
+        val reader = BufferedReader(InputStreamReader(proc.inputStream))
+
+        val urlRegex = Regex("""(https://auth\.openai\.com/\S+)""")
+        val codeRegex = Regex("""([A-Z0-9]{4}-[A-Z0-9]{5})""")
+        var foundUrl = ""
+        var foundCode = ""
+
+        var line = reader.readLine()
+        while (line != null) {
+            val clean = line.replace(Regex("\\x1b\\[[0-9;]*m"), "").trim()
+            Log.d(TAG, "[device-auth] $clean")
+            onProgress(clean)
+
+            if (foundUrl.isEmpty()) {
+                urlRegex.find(clean)?.let { foundUrl = it.value }
+            }
+            if (foundCode.isEmpty()) {
+                codeRegex.find(clean)?.let { foundCode = it.value }
+            }
+
+            if (foundUrl.isNotEmpty() && foundCode.isNotEmpty()) {
+                onDeviceCode(foundUrl, foundCode)
+            }
+
+            line = reader.readLine()
+        }
+
+        val exitCode = proc.waitFor()
+        Log.i(TAG, "codex login --device-auth exited with code $exitCode")
+        return exitCode == 0
+    }
+
+    // ── Health check ────────────────────────────────────────────────────────
+
+    /**
+     * Send a minimal prompt ("hi") to Codex in non-interactive (exec) mode
+     * via the CONNECT proxy. Confirms the API key is valid and the native
+     * binary can reach OpenAI.
+     */
+    fun healthCheck(onProgress: (String) -> Unit): Boolean {
+        onProgress("Sending test message…")
+
+        val paths = BootstrapInstaller.getPaths(context)
+        val env = buildEnvironment(paths).toMutableMap()
+        env["HTTPS_PROXY"] = "http://127.0.0.1:$PROXY_PORT"
+        env["HTTP_PROXY"] = "http://127.0.0.1:$PROXY_PORT"
+
+        val shell = "${paths.prefixDir}/bin/sh"
+        val cmd = "${codexBinPath()} exec \"say hi\" 2>&1"
+
+        val pb = ProcessBuilder(shell, "-c", cmd)
+        pb.environment().clear()
+        pb.environment().putAll(env)
+        pb.directory(File(paths.homeDir))
+        pb.redirectErrorStream(true)
+
+        val proc = pb.start()
+        val sb = StringBuilder()
+        val reader = BufferedReader(InputStreamReader(proc.inputStream))
+        var line = reader.readLine()
+        while (line != null) {
+            val clean = line.replace(Regex("\\x1b\\[[0-9;]*m"), "").trim()
+            Log.d(TAG, "[health] $clean")
+            sb.appendLine(clean)
+            onProgress(clean)
+            line = reader.readLine()
+        }
+
+        val exitCode = proc.waitFor()
+        val output = sb.toString().trim()
+        Log.i(TAG, "Health check exit=$exitCode output=$output")
+
+        if (exitCode != 0) {
+            Log.e(TAG, "Health check failed with exit code $exitCode")
+            return false
+        }
+
+        return output.isNotEmpty()
+    }
+
+    // ── Server lifecycle ────────────────────────────────────────────────────
+
+    /**
+     * Start the codex-web-local server. The CONNECT proxy must be running
+     * and authentication must have been completed first.
+     */
+    fun startServer(): Boolean {
         if (isRunning) {
             Log.i(TAG, "Server already running")
             return true
         }
 
         val paths = BootstrapInstaller.getPaths(context)
-        val env = buildEnvironment(paths, apiKey)
+        val env = buildEnvironment(paths).toMutableMap()
+        env["HTTPS_PROXY"] = "http://127.0.0.1:$PROXY_PORT"
+        env["HTTP_PROXY"] = "http://127.0.0.1:$PROXY_PORT"
 
         val serverScript = "${paths.prefixDir}/lib/node_modules/codex-web-local/dist-cli/index.js"
         if (!File(serverScript).exists()) {
@@ -290,10 +544,6 @@ WEOF
         return true
     }
 
-    /**
-     * Wait until the server responds to HTTP requests.
-     * Returns true if the server is reachable within the timeout.
-     */
     fun waitForServer(timeoutMs: Long = 60_000): Boolean {
         val deadline = System.currentTimeMillis() + timeoutMs
         val url = URL("http://127.0.0.1:$SERVER_PORT/")
@@ -320,9 +570,6 @@ WEOF
         return false
     }
 
-    /**
-     * Stop the server process.
-     */
     fun stopServer() {
         val proc = serverProcess ?: return
         serverProcess = null
@@ -339,14 +586,36 @@ WEOF
             Thread.currentThread().interrupt()
         }
 
+        stopProxy()
         Log.i(TAG, "Server stopped")
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
+    private fun extractAssetDir(assetPath: String, targetDir: File) {
+        val list = context.assets.list(assetPath) ?: return
+        targetDir.mkdirs()
+        for (entry in list) {
+            val subAsset = "$assetPath/$entry"
+            val subTarget = File(targetDir, entry)
+            val subList = context.assets.list(subAsset)
+            if (subList != null && subList.isNotEmpty()) {
+                subTarget.mkdirs()
+                extractAssetDir(subAsset, subTarget)
+            } else {
+                context.assets.open(subAsset).use { input ->
+                    subTarget.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+            }
+        }
     }
 
     private fun buildEnvironment(
         paths: BootstrapInstaller.Paths,
-        apiKey: String?,
     ): Map<String, String> {
-        val env = mutableMapOf(
+        return mapOf(
             "PREFIX" to paths.prefixDir,
             "HOME" to paths.homeDir,
             "PATH" to "${paths.prefixDir}/bin:${paths.prefixDir}/bin/applets:/system/bin",
@@ -359,21 +628,14 @@ WEOF
             "TERM" to "xterm-256color",
             "ANDROID_DATA" to "/data",
             "ANDROID_ROOT" to "/system",
-            // Override compiled-in Termux prefix for apt
             "APT_CONFIG" to "${paths.prefixDir}/etc/apt/apt.conf",
             "DPKG_ADMINDIR" to "${paths.prefixDir}/var/lib/dpkg",
-            // SSL certificate paths for https methods
             "SSL_CERT_FILE" to "${paths.prefixDir}/etc/tls/cert.pem",
             "SSL_CERT_DIR" to "/system/etc/security/cacerts",
             "CURL_CA_BUNDLE" to "${paths.prefixDir}/etc/tls/cert.pem",
             "GIT_SSL_CAINFO" to "${paths.prefixDir}/etc/tls/cert.pem",
-            // OpenSSL config — the Node.js binary has the Termux path compiled in
             "OPENSSL_CONF" to "${paths.prefixDir}/etc/tls/openssl.cnf",
             "NODE_OPTIONS" to "--openssl-config=${paths.prefixDir}/etc/tls/openssl.cnf",
         )
-        if (!apiKey.isNullOrBlank()) {
-            env["OPENAI_API_KEY"] = apiKey
-        }
-        return env
     }
 }

@@ -1,6 +1,9 @@
 package com.codex.mobile
 
-import android.content.SharedPreferences
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.util.Log
 import android.view.View
@@ -11,17 +14,14 @@ import android.webkit.WebViewClient
 import android.widget.EditText
 import android.widget.ProgressBar
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 
 class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "CodexMainActivity"
-        private const val PREFS_FILE = "codex_prefs"
-        private const val KEY_API_KEY = "openai_api_key"
     }
 
     private lateinit var webView: WebView
@@ -30,7 +30,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusDetail: TextView
     private lateinit var progressBar: ProgressBar
     private lateinit var serverManager: CodexServerManager
-    private lateinit var securePrefs: SharedPreferences
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -43,7 +42,6 @@ class MainActivity : AppCompatActivity() {
         progressBar = findViewById(R.id.progressBar)
 
         serverManager = CodexServerManager(this)
-        securePrefs = createSecurePrefs()
 
         setupWebView()
         startSetupFlow()
@@ -113,7 +111,7 @@ class MainActivity : AppCompatActivity() {
         }
         updateStatus("Environment ready")
 
-        // Step 2: Install Node.js if needed
+        // Step 2: Install Node.js
         if (!serverManager.isNodeInstalled()) {
             updateStatus("Installing Node.js (first run)…", "This may take a few minutes")
             val nodeOk = serverManager.installNode { msg -> updateDetail(msg) }
@@ -123,11 +121,10 @@ class MainActivity : AppCompatActivity() {
         }
         updateStatus("Node.js ready")
 
-        // Step 3: Install Codex CLI if needed
+        // Step 3: Install Codex CLI + web UI
         if (!serverManager.isCodexInstalled() || !serverManager.isServerBundleInstalled()) {
             updateStatus("Installing Codex…", "This may take a few minutes")
 
-            // Try bundled assets first, then fall back to npm
             if (!serverManager.installServerBundle { msg -> updateDetail(msg) }) {
                 val codexOk = serverManager.installCodex { msg -> updateDetail(msg) }
                 if (!codexOk) {
@@ -135,29 +132,70 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+
+        // Step 3b: Install native platform binary
+        if (!serverManager.isPlatformBinaryInstalled()) {
+            updateStatus("Installing Codex platform binary…")
+            val binOk = serverManager.installPlatformBinary { msg -> updateDetail(msg) }
+            if (!binOk) {
+                throw RuntimeException("Failed to install Codex platform binary")
+            }
+        }
         updateStatus("Codex ready")
 
-        // Step 4: Get API key
-        val apiKey = getOrRequestApiKey()
-        if (apiKey.isBlank()) {
-            throw RuntimeException("No API key provided")
+        // Step 4: Start CONNECT proxy (needed for native binary DNS/TLS)
+        updateStatus("Starting network proxy…")
+        if (!serverManager.startProxy()) {
+            throw RuntimeException("Failed to start network proxy")
         }
 
-        // Step 5: Start server
+        // Step 5: Authenticate via `codex login`
+        updateStatus("Checking authentication…")
+        if (!serverManager.isLoggedIn()) {
+            updateStatus("Login required — starting device auth…")
+            val authOk = serverManager.loginWithDeviceAuth(
+                onDeviceCode = { url, code ->
+                    runOnUiThread { showDeviceCodeDialog(url, code) }
+                },
+                onProgress = { msg -> updateDetail(msg) },
+            )
+            if (!authOk && !serverManager.isLoggedIn()) {
+                updateStatus("Device auth failed — enter API key manually")
+                val apiKey = requestApiKey()
+                if (apiKey.isBlank()) {
+                    throw RuntimeException("No API key provided")
+                }
+                val loginOk = serverManager.loginWithApiKey(apiKey)
+                if (!loginOk) {
+                    throw RuntimeException("Login failed — check your API key")
+                }
+            }
+        }
+        updateStatus("Authenticated")
+
+        // Step 6: Health check
+        updateStatus("Verifying API access…", "Sending test message")
+        val healthOk = serverManager.healthCheck { msg -> updateDetail(msg) }
+        if (!healthOk) {
+            throw RuntimeException("API health check failed — Codex could not reach OpenAI")
+        }
+        updateStatus("API verified")
+
+        // Step 7: Start web server
         updateStatus("Starting server…")
-        val started = serverManager.startServer(apiKey)
+        val started = serverManager.startServer()
         if (!started) {
             throw RuntimeException("Failed to start server")
         }
 
-        // Step 6: Wait for server to be ready
+        // Step 8: Wait for ready
         updateStatus("Waiting for server…")
         val ready = serverManager.waitForServer(timeoutMs = 90_000)
         if (!ready) {
             throw RuntimeException("Server did not start in time")
         }
 
-        // Step 7: Load WebView
+        // Step 9: Show web UI
         runOnUiThread {
             showLoading(false)
             webView.visibility = View.VISIBLE
@@ -165,61 +203,71 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun getOrRequestApiKey(): String {
-        val stored = securePrefs.getString(KEY_API_KEY, null)
-        if (!stored.isNullOrBlank()) {
-            return stored
-        }
+    // ── Device auth dialog ──────────────────────────────────────────────────
 
-        // Block current thread and show dialog on UI thread
+    private fun showDeviceCodeDialog(url: String, code: String) {
+        val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("Codex device code", code))
+        Toast.makeText(this, "Code copied to clipboard", Toast.LENGTH_SHORT).show()
+
+        AlertDialog.Builder(this)
+            .setTitle("Sign in to Codex")
+            .setMessage(
+                "Open the link below in your browser and enter this code:\n\n" +
+                    "Code: $code\n\n" +
+                    "The code has been copied to your clipboard.",
+            )
+            .setPositiveButton("Open Browser") { _, _ ->
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            }
+            .setNeutralButton("Copy Code") { _, _ ->
+                clipboard.setPrimaryClip(ClipData.newPlainText("Codex device code", code))
+                Toast.makeText(this, "Code copied", Toast.LENGTH_SHORT).show()
+            }
+            .setCancelable(false)
+            .show()
+    }
+
+    /**
+     * Fallback: prompt for API key if device auth fails.
+     */
+    private fun requestApiKey(): String {
         var result = ""
         val lock = Object()
 
         runOnUiThread {
-            showApiKeyDialog { key ->
-                result = key
-                synchronized(lock) {
-                    lock.notifyAll()
-                }
+            val input = EditText(this).apply {
+                hint = getString(R.string.api_key_hint)
+                setSingleLine(true)
             }
+            val padding = (24 * resources.displayMetrics.density).toInt()
+            val container = android.widget.FrameLayout(this).apply {
+                setPadding(padding, padding / 2, padding, 0)
+                addView(input)
+            }
+
+            AlertDialog.Builder(this)
+                .setTitle(R.string.api_key_title)
+                .setMessage(R.string.api_key_message)
+                .setView(container)
+                .setCancelable(false)
+                .setPositiveButton(R.string.ok) { _, _ ->
+                    result = input.text.toString().trim()
+                    synchronized(lock) { lock.notifyAll() }
+                }
+                .setNegativeButton(R.string.cancel) { _, _ ->
+                    synchronized(lock) { lock.notifyAll() }
+                }
+                .show()
         }
 
         synchronized(lock) {
-            lock.wait(300_000) // 5 min max wait for user input
+            lock.wait(300_000)
         }
-
-        if (result.isNotBlank()) {
-            securePrefs.edit().putString(KEY_API_KEY, result).apply()
-        }
-
         return result
     }
 
-    private fun showApiKeyDialog(onResult: (String) -> Unit) {
-        val input = EditText(this).apply {
-            hint = getString(R.string.api_key_hint)
-            setSingleLine(true)
-        }
-
-        val padding = (24 * resources.displayMetrics.density).toInt()
-        val container = android.widget.FrameLayout(this).apply {
-            setPadding(padding, padding / 2, padding, 0)
-            addView(input)
-        }
-
-        AlertDialog.Builder(this)
-            .setTitle(R.string.api_key_title)
-            .setMessage(R.string.api_key_message)
-            .setView(container)
-            .setCancelable(false)
-            .setPositiveButton(R.string.ok) { _, _ ->
-                onResult(input.text.toString().trim())
-            }
-            .setNegativeButton(R.string.cancel) { _, _ ->
-                onResult("")
-            }
-            .show()
-    }
+    // ── UI helpers ──────────────────────────────────────────────────────────
 
     private fun showError(message: String) {
         AlertDialog.Builder(this)
@@ -257,25 +305,6 @@ class MainActivity : AppCompatActivity() {
         runOnUiThread {
             statusDetail.text = text
             statusDetail.visibility = View.VISIBLE
-        }
-    }
-
-    private fun createSecurePrefs(): SharedPreferences {
-        return try {
-            val masterKey = MasterKey.Builder(this)
-                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                .build()
-
-            EncryptedSharedPreferences.create(
-                this,
-                PREFS_FILE,
-                masterKey,
-                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-            )
-        } catch (e: Exception) {
-            Log.w(TAG, "EncryptedSharedPreferences unavailable, falling back to plain prefs", e)
-            getSharedPreferences(PREFS_FILE, MODE_PRIVATE)
         }
     }
 }
