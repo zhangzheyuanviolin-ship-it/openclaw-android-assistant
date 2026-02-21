@@ -2,7 +2,10 @@ package com.codex.mobile
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import android.util.Log
 import android.view.View
 import android.webkit.ConsoleMessage
@@ -40,6 +43,8 @@ class MainActivity : AppCompatActivity() {
 
         serverManager = CodexServerManager(this)
 
+        requestBatteryOptimizationExemption()
+        startForegroundService()
         setupWebView()
         startSetupFlow()
     }
@@ -47,6 +52,32 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         serverManager.stopServer()
+        stopService(Intent(this, CodexForegroundService::class.java))
+    }
+
+    private fun requestBatteryOptimizationExemption() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        val pm = getSystemService(PowerManager::class.java) ?: return
+        if (pm.isIgnoringBatteryOptimizations(packageName)) return
+
+        try {
+            @Suppress("BatteryLife")
+            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = Uri.parse("package:$packageName")
+            }
+            startActivity(intent)
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not request battery optimization exemption: ${e.message}")
+        }
+    }
+
+    private fun startForegroundService() {
+        val intent = Intent(this, CodexForegroundService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
     }
 
     @Deprecated("Use onBackPressedDispatcher")
@@ -139,6 +170,9 @@ class MainActivity : AppCompatActivity() {
             }
         }
         updateStatus("Codex ready")
+
+        // Step 3c: Write full-access config (no approval prompts)
+        serverManager.ensureFullAccessConfig()
 
         // Step 4: Start CONNECT proxy (needed for native binary DNS/TLS)
         updateStatus("Starting network proxy…")

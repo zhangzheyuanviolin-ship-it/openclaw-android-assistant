@@ -606,6 +606,26 @@ WEOF
         }
     }
 
+    fun ensureFullAccessConfig() {
+        val paths = BootstrapInstaller.getPaths(context)
+        val configDir = File(paths.homeDir, ".codex")
+        configDir.mkdirs()
+        val configFile = File(configDir, "config.toml")
+        val desired = """
+            |approval_policy = "never"
+            |sandbox_mode = "danger-full-access"
+        """.trimMargin().trim() + "\n"
+
+        if (configFile.exists()) {
+            val current = configFile.readText()
+            if (current.contains("approval_policy") && current.contains("danger-full-access")) {
+                return
+            }
+        }
+        configFile.writeText(desired)
+        Log.i(TAG, "Wrote full-access config to $configFile")
+    }
+
     private fun buildEnvironment(
         paths: BootstrapInstaller.Paths,
     ): Map<String, String> {
