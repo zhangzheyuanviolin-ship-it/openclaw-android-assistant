@@ -50,25 +50,28 @@ jobs:
         working-directory: android
         run: ./gradlew assembleDebug
 
+      - name: Rename APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk android/app/build/outputs/apk/debug/codexapp.apk
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: codex-mobile-debug
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: codexapp
+          path: android/app/build/outputs/apk/debug/codexapp.apk
 
       - name: Create Release
         if: github.ref == 'refs/heads/android'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ github.run_number }}
-          name: "Codex Mobile v${{ github.run_number }}"
+          name: "Codex App v${{ github.run_number }}"
           body: |
-            🔥 **Codex Mobile** — OpenAI Codex CLI on Android
+            🔥 **Codex App** — OpenAI Codex on Android
 
             📱 Install the APK on any ARM64 Android 7.0+ device.
             No root required.
 
             Built from commit ${{ github.sha }}
-          files: android/app/build/outputs/apk/debug/app-debug.apk
+          files: android/app/build/outputs/apk/debug/codexapp.apk
           draft: false
           prerelease: false

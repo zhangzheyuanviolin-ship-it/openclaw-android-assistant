@@ -2,7 +2,7 @@
 
 # 🔥 Codex Mobile
 
-### 📱 OpenAI Codex CLI — In Your Pocket — On Android 📱
+### 📱 OpenAI Codex App — In Your Pocket — On Android 📱
 
 [![Android](https://img.shields.io/badge/Android-24+-3DDC84?logo=android&logoColor=white&style=for-the-badge)](https://developer.android.com)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.1-7F52FF?logo=kotlin&logoColor=white&style=for-the-badge)](https://kotlinlang.org)
@@ -13,9 +13,9 @@
 
 <br />
 
-> **They built an AI coding agent for the terminal.**
+> **They built an AI coding agent for desktop.**
 > **We put an entire Linux environment inside an Android app and ran it there.**
-> **One APK. No root. Full Codex.**
+> **One APK. No root. Full Codex App.**
 
 <br />
 
@@ -37,11 +37,11 @@
 
 ## 🤯 What Is This?
 
-OpenAI shipped [Codex CLI](https://github.com/openai/codex) — a terminal-based AI coding agent that can read, write, and execute code. **But it only runs on Linux and macOS.**
+OpenAI shipped [Codex](https://github.com/openai/codex) — an AI coding agent that can read, write, and execute code. **But it only runs on Linux and macOS desktops.**
 
 We said: *what if it ran on your phone?*
 
-This app bundles a **full Termux Linux environment**, **Node.js 21**, the **Codex CLI**, and a **Vue.js web interface** — all inside a single Android APK. No root required. No terminal knowledge needed. Open the app, authenticate with OpenAI, and start coding from your pocket.
+This app bundles a **full Termux Linux environment**, **Node.js 21**, the **Codex App**, and a **Vue.js web interface** — all inside a single Android APK. No root required. No terminal knowledge needed. Open the app, authenticate with OpenAI, and start coding from your pocket.
 
 **Yes, that's a real Linux userland. Yes, that's the real Codex binary. Yes, it runs on your phone.** 🧠
 
@@ -58,7 +58,7 @@ This app bundles a **full Termux Linux environment**, **Node.js 21**, the **Code
 </td>
 <td align="center" width="50%">
 <br /><b>⚡ First Launch</b><br />
-<sub>Extracts Termux bootstrap → installs Node.js via apt → deploys Codex CLI → downloads native binary → authenticates via OAuth → ready in ~2 minutes</sub>
+<sub>Extracts Termux bootstrap → installs Node.js via apt → deploys Codex App → downloads native binary → authenticates via OAuth → ready in ~2 minutes</sub>
 </td>
 </tr>
 </table>
@@ -71,7 +71,7 @@ This app bundles a **full Termux Linux environment**, **Node.js 21**, the **Code
 | | Use Case | Description |
 |---|---|---|
 | 💻 | **Code on the go** | Write, debug, and refactor code from your phone or tablet |
-| 🤖 | **AI pair programming** | Full Codex agent with tool use, file I/O, and shell access |
+| 🤖 | **AI pair programming** | Full Codex App agent with tool use, file I/O, and shell access |
 | 📂 | **Manage projects** | Multiple threads, model selection, reasoning effort control |
 | 🔓 | **Full access mode** | `danger-full-access` sandbox — no approval prompts, maximum speed |
 | 🌐 | **OAuth login** | Browser-based OpenAI authentication, no manual API keys needed |
@@ -96,7 +96,7 @@ bash android/scripts/build-server-bundle.sh
 
 # 🚀 Build APK
 cd android && ./gradlew assembleDebug
-# APK at: android/app/build/outputs/apk/debug/app-debug.apk ✈️
+# APK at: android/app/build/outputs/apk/debug/codexapp.apk ✈️
 ```
 
 Or grab the latest APK from [**Releases**](https://github.com/friuns2/codex-web-local/releases) 📥
