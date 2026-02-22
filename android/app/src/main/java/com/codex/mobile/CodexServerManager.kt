@@ -192,17 +192,30 @@ WEOF
             return false
         }
 
-        onProgress("Installing codex-web-local…")
-        val webCode = runInPrefix(
-            "node $npmCli install -g codex-web-local 2>&1",
-            onOutput = { onProgress(it) },
-        )
-        if (webCode != 0) {
-            Log.e(TAG, "npm install codex-web-local failed with code $webCode")
-            return false
-        }
+        ensureCodexWrapperScript()
+        return isCodexInstalled()
+    }
 
-        return isCodexInstalled() && isServerBundleInstalled()
+    fun ensureCodexWrapperScript() {
+        val paths = BootstrapInstaller.getPaths(context)
+        val prefix = paths.prefixDir
+        val codexJs = File(prefix, "lib/node_modules/@openai/codex/bin/codex.js")
+        val codexBin = File(prefix, "bin/codex")
+
+        if (!codexJs.exists()) return
+        if (codexBin.exists()) return
+
+        val wrapperCmd = """
+            rm -f "$prefix/bin/codex"
+            cat > "$prefix/bin/codex" << 'WEOF'
+#!/data/user/0/com.codex.mobile/files/usr/bin/sh
+exec /data/user/0/com.codex.mobile/files/usr/bin/node /data/user/0/com.codex.mobile/files/usr/lib/node_modules/@openai/codex/bin/codex.js "${'$'}@"
+WEOF
+            chmod 700 "$prefix/bin/codex"
+            echo "codex wrapper created"
+        """.trimIndent()
+        runInPrefix(wrapperCmd)
+        Log.i(TAG, "Created codex wrapper at $codexBin")
     }
 
     fun installServerBundle(onProgress: (String) -> Unit): Boolean {
@@ -604,6 +617,16 @@ WEOF
                 }
             }
         }
+    }
+
+    fun ensureDefaultWorkspace() {
+        val paths = BootstrapInstaller.getPaths(context)
+        val workspaceDir = File(paths.homeDir, "codex")
+        if (workspaceDir.exists()) return
+
+        workspaceDir.mkdirs()
+        runInPrefix("cd ${workspaceDir.absolutePath} && git init 2>&1")
+        Log.i(TAG, "Created default workspace at $workspaceDir")
     }
 
     fun ensureFullAccessConfig() {

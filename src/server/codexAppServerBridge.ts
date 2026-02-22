@@ -2,7 +2,10 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { mkdtemp, readFile } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
+
+const prefixBin = process.env.PREFIX ? join(process.env.PREFIX, 'bin') : ''
+const shellPath = prefixBin ? join(prefixBin, 'sh') : '/bin/sh'
 
 type JsonRpcCall = {
   jsonrpc: '2.0'
@@ -102,7 +105,8 @@ class AppServerProcess {
     if (this.process) return
 
     this.stopping = false
-    const proc = spawn('codex', ['app-server'], { stdio: ['pipe', 'pipe', 'pipe'] })
+    const codexBin = prefixBin ? join(prefixBin, 'codex') : 'codex'
+    const proc = spawn(codexBin, ['app-server'], { stdio: ['pipe', 'pipe', 'pipe'] })
     this.process = proc
 
     proc.stdout.setEncoding('utf8')
@@ -372,7 +376,8 @@ class MethodCatalog {
 
   private async runGenerateSchemaCommand(outDir: string): Promise<void> {
     await new Promise<void>((resolve, reject) => {
-      const process = spawn('codex', ['app-server', 'generate-json-schema', '--out', outDir], {
+      const codexBin = prefixBin ? join(prefixBin, 'codex') : 'codex'
+      const process = spawn(codexBin, ['app-server', 'generate-json-schema', '--out', outDir], {
         stdio: ['ignore', 'ignore', 'pipe'],
       })
 

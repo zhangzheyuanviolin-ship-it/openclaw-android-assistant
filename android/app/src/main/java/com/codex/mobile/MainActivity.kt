@@ -149,17 +149,21 @@ class MainActivity : AppCompatActivity() {
         }
         updateStatus("Node.js ready")
 
-        // Step 3: Install Codex CLI + web UI
-        if (!serverManager.isCodexInstalled() || !serverManager.isServerBundleInstalled()) {
-            updateStatus("Installing Codex…", "This may take a few minutes")
-
-            if (!serverManager.installServerBundle { msg -> updateDetail(msg) }) {
-                val codexOk = serverManager.installCodex { msg -> updateDetail(msg) }
-                if (!codexOk) {
-                    throw RuntimeException("Failed to install Codex")
-                }
+        // Step 3: Install Codex CLI
+        if (!serverManager.isCodexInstalled()) {
+            updateStatus("Installing Codex CLI…", "This may take a few minutes")
+            val codexOk = serverManager.installCodex { msg -> updateDetail(msg) }
+            if (!codexOk) {
+                throw RuntimeException("Failed to install Codex")
             }
         }
+
+        // Ensure codex wrapper script exists
+        serverManager.ensureCodexWrapperScript()
+
+        // Step 3a: Extract web UI from APK assets (every launch)
+        updateStatus("Updating web UI…")
+        serverManager.installServerBundle { msg -> updateDetail(msg) }
 
         // Step 3b: Install native platform binary
         if (!serverManager.isPlatformBinaryInstalled()) {
@@ -171,8 +175,9 @@ class MainActivity : AppCompatActivity() {
         }
         updateStatus("Codex ready")
 
-        // Step 3c: Write full-access config (no approval prompts)
+        // Step 3c: Write full-access config and create default workspace
         serverManager.ensureFullAccessConfig()
+        serverManager.ensureDefaultWorkspace()
 
         // Step 4: Start CONNECT proxy (needed for native binary DNS/TLS)
         updateStatus("Starting network proxy…")

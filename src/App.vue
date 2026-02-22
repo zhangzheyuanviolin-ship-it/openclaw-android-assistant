@@ -215,6 +215,8 @@ const filteredMessages = computed(() =>
 const liveOverlay = computed(() => selectedLiveOverlay.value)
 const composerThreadContextId = computed(() => (isHomeRoute.value ? '__new-thread__' : selectedThreadId.value))
 const isSelectedThreadInProgress = computed(() => !isHomeRoute.value && selectedThread.value?.inProgress === true)
+const DEFAULT_WORKSPACE_NAME = 'codex'
+
 const newThreadFolderOptions = computed(() => {
   const options: Array<{ value: string; label: string }> = []
   const seenCwds = new Set<string>()
@@ -227,6 +229,10 @@ const newThreadFolderOptions = computed(() => {
       value: cwd,
       label: projectDisplayNameById.value[group.projectName] ?? group.projectName,
     })
+  }
+
+  if (options.length === 0) {
+    options.push({ value: DEFAULT_WORKSPACE_NAME, label: DEFAULT_WORKSPACE_NAME })
   }
 
   return options
