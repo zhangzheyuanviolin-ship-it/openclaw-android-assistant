@@ -1,6 +1,6 @@
-# Codex Mobile (Android)
+# AnyClaw (Android)
 
-Android APK that embeds a Termux-style Linux bootstrap environment, installs Codex on first run, and presents the codex-web-local UI inside a WebView.
+Android APK that embeds a Termux-style Linux bootstrap environment, installs OpenClaw + Codex on first run, and presents the AnyClaw UI inside a WebView.
 
 ## Architecture
 

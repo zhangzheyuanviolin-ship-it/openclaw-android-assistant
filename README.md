@@ -1,8 +1,8 @@
 <div align="center">
 
-# OpenClaw Android Assistant
+# AnyClaw
 
-### Your Personal AI Assistant Running Natively on Android
+### OpenClaw + Codex — Running Natively on Android
 
 [![Android](https://img.shields.io/badge/Android-7.0+-3DDC84?logo=android&logoColor=white&style=for-the-badge)](https://developer.android.com)
 [![OpenClaw](https://img.shields.io/badge/OpenClaw-2026.2.21-FF4500?style=for-the-badge)](https://openclaw.ai)

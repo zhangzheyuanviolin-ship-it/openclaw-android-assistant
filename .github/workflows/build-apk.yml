@@ -51,13 +51,13 @@ jobs:
         run: ./gradlew assembleDebug
 
       - name: Rename APK
-        run: cp android/app/build/outputs/apk/debug/app-debug.apk android/app/build/outputs/apk/debug/codexapp.apk
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk android/app/build/outputs/apk/debug/anyclaw.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: codexapp
-          path: android/app/build/outputs/apk/debug/codexapp.apk
+          name: anyclaw
+          path: android/app/build/outputs/apk/debug/anyclaw.apk
 
       - name: Generate changelog
         if: github.ref_type == 'branch'
@@ -80,9 +80,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ github.run_number }}
-          name: "Codex App v${{ github.run_number }} (${{ github.ref_name }})"
+          name: "AnyClaw v${{ github.run_number }} (${{ github.ref_name }})"
           body: |
-            🔥 **Codex App** — OpenAI Codex on Android
+            🦞 **AnyClaw** — OpenClaw + Codex on Android
 
             📱 Install the APK on any ARM64 Android 7.0+ device. No root required.
 
@@ -92,6 +92,6 @@ jobs:
             ---
             Branch: ${{ github.ref_name }}
             Built from commit ${{ github.sha }}
-          files: android/app/build/outputs/apk/debug/codexapp.apk
+          files: android/app/build/outputs/apk/debug/anyclaw.apk
           draft: false
           prerelease: false
