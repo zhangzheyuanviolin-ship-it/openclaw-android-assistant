@@ -769,6 +769,16 @@ H3
     /**
      * Start the OpenClaw WebSocket gateway. Requires openclaw.json to be
      * configured first via [configureOpenClawAuth].
+     *
+     * Before starting:
+     * 1. Kill any orphaned gateway process (scanning /proc, PID files).
+     * 2. Reset device tokens via `openclaw gateway token reset` so stale
+     *    device identities from previous devices/browsers are wiped.
+     * 3. Clear lock/pid files and client-side device-auth state.
+     *
+     * Combined with `dangerouslyDisableDeviceAuth: true` and
+     * `allowInsecureAuth: true` in openclaw.json, this ensures any
+     * device can connect without "device token mismatch" errors.
      */
     fun startOpenClawGateway(): Boolean {
         if (openClawGatewayProcess != null) {
@@ -782,6 +792,31 @@ H3
         }
 
         val paths = BootstrapInstaller.getPaths(context)
+
+        // Kill any orphaned gateway processes and reset all device tokens.
+        runInPrefix("""
+            # Kill by PID file
+            for pidfile in ${paths.prefixDir}/tmp/openclaw*/gateway.pid ${paths.prefixDir}/tmp/openclaw/gateway.pid; do
+                [ -f "${'$'}pidfile" ] && kill -9 ${'$'}(cat "${'$'}pidfile" 2>/dev/null) 2>/dev/null
+            done
+            # Scan /proc for any node process bound to the gateway port
+            for pid in ${'$'}(ls /proc 2>/dev/null | grep '^[0-9]'); do
+                if cat /proc/${'$'}pid/cmdline 2>/dev/null | tr '\0' ' ' | grep -q "18789"; then
+                    kill -9 ${'$'}pid 2>/dev/null
+                fi
+            done
+            # Clear stale lock/pid files
+            rm -f ${paths.prefixDir}/tmp/openclaw*/gateway.lock ${paths.prefixDir}/tmp/openclaw*/gateway.pid 2>/dev/null
+            rm -f ${paths.prefixDir}/tmp/openclaw/gateway.lock ${paths.prefixDir}/tmp/openclaw/gateway.pid 2>/dev/null
+            # Clear device-auth state (identity keypair, device-auth tokens)
+            rm -rf ${paths.homeDir}/.local/state/openclaw/identity 2>/dev/null
+            rm -f ${paths.homeDir}/.local/state/openclaw/device-auth.json 2>/dev/null
+            sleep 1
+            # Reset all device tokens so no stale tokens remain
+            openclaw gateway token reset 2>&1 || echo "token reset skipped (gateway not running)"
+            echo "Gateway state cleaned"
+        """.trimIndent()) { Log.d(TAG, "[openclaw-gw] $it") }
+
         val env = buildEnvironment(paths)
         val shell = "${paths.prefixDir}/bin/sh"
         val cmd = "exec openclaw gateway run --force --port $OPENCLAW_GATEWAY_PORT 2>&1"
@@ -1406,7 +1441,7 @@ WEOF
             "GIT_EXEC_PATH" to "${paths.prefixDir}/libexec/git-core",
             "GIT_TEMPLATE_DIR" to "${paths.prefixDir}/share/git-core/templates",
             "OPENSSL_CONF" to "${paths.prefixDir}/etc/tls/openssl.cnf",
-            "NODE_OPTIONS" to "--openssl-config=${paths.prefixDir}/etc/tls/openssl.cnf$bionicCompatOpt",
+            "NODE_OPTIONS" to "--openssl-config=${paths.prefixDir}/etc/tls/openssl.cnf --unhandled-rejections=warn$bionicCompatOpt",
             "CONTAINER" to "1",
         )
     }

@@ -146,8 +146,7 @@ import type { ReasoningEffort, ThreadScrollState } from './types/codex'
 const SIDEBAR_COLLAPSED_STORAGE_KEY = 'codex-web-local.sidebar-collapsed.v1'
 const OPENCLAW_GATEWAY_TOKEN = 'openclaw-android-local-token'
 const openClawDashboardUrl = computed(() => {
-  const host = window.location.hostname || '127.0.0.1'
-  return `http://${host}:19001/?gatewayUrl=ws://${host}:18789&token=${OPENCLAW_GATEWAY_TOKEN}`
+  return `http://localhost:19001/?gatewayUrl=ws://localhost:18789&token=${OPENCLAW_GATEWAY_TOKEN}`
 })
 
 const {
