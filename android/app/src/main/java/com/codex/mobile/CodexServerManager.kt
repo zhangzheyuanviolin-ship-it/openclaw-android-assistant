@@ -23,7 +23,6 @@ class CodexServerManager(private val context: Context) {
         private const val CODEX_VERSION = "0.104.0"
         const val OPENCLAW_GATEWAY_PORT = 18789
         const val OPENCLAW_CONTROL_UI_PORT = 19001
-        private const val OPENCLAW_GATEWAY_TOKEN = "openclaw-android-local-token"
     }
 
     private var serverProcess: Process? = null
@@ -558,6 +557,11 @@ H3
         onProgress("Patching OpenClaw paths…")
         patchOpenClawPaths()
 
+        // Patch gateway JS to survive Android network interface errors
+        // and allow device-auth bypass
+        onProgress("Patching gateway for Android…")
+        patchGatewayForAndroid()
+
         return isOpenClawInstalled()
     }
 
@@ -669,11 +673,54 @@ H3
     }
 
     /**
-     * Write openclaw.json (gateway token auth + dangerouslyDisableDeviceAuth)
+     * Patch OpenClaw gateway JS files for Android compatibility:
+     * 1. runner-*.js: Prevent process.exit(1) on @homebridge/ciao
+     *    assertion errors (Android's ccmni cellular interface triggers
+     *    "Could not find valid addresses for interface 'ccmniN'").
+     * 2. gateway-cli-*.js: Make evaluateMissingDeviceIdentity() return
+     *    "allow" when dangerouslyDisableDeviceAuth is true, so the
+     *    Control UI can connect without generating device identity keys.
+     */
+    private fun patchGatewayForAndroid() {
+        val paths = BootstrapInstaller.getPaths(context)
+        val prefix = paths.prefixDir
+        val distDir = "$prefix/lib/node_modules/openclaw/dist"
+
+        val patchCmd = """
+            DIST="$distDir"
+            [ ! -d "${'$'}DIST" ] && echo "dist not found" && exit 0
+
+            # 1. Patch runner-*.js: catch network interface errors
+            for f in ${'$'}DIST/runner-*.js; do
+                [ ! -f "${'$'}f" ] && continue
+                grep -q 'Unhandled promise rejection' "${'$'}f" || continue
+                sed -i 's|console.error("\[openclaw\] Unhandled promise rejection:", formatUncaughtError(reason));|if (reason \&\& reason.message \&\& reason.message.includes("interface")) { console.warn("[openclaw] Non-fatal network interface error (continuing):", formatUncaughtError(reason)); return; } console.error("[openclaw] Unhandled promise rejection:", formatUncaughtError(reason));|' "${'$'}f"
+                echo "patched runner: ${'$'}f"
+            done
+
+            # 2. Patch gateway-cli-*.js: allow device-auth bypass
+            for f in ${'$'}DIST/gateway-cli-*.js; do
+                [ ! -f "${'$'}f" ] && continue
+                grep -q 'evaluateMissingDeviceIdentity' "${'$'}f" || continue
+                sed -i 's|function evaluateMissingDeviceIdentity(params) {|function evaluateMissingDeviceIdentity(params) { if (params.controlUiAuthPolicy.allowBypass) return { kind: "allow" };|' "${'$'}f"
+                echo "patched gateway-cli: ${'$'}f"
+            done
+
+            echo "Gateway Android patches applied"
+        """.trimIndent()
+
+        runInPrefix(patchCmd) { Log.d(TAG, "[gw-patch] $it") }
+        Log.i(TAG, "Gateway Android patches applied")
+    }
+
+    /**
+     * Write openclaw.json (gateway auth=none + dangerouslyDisableDeviceAuth)
      * and auth-profiles.json (OpenAI token from existing Codex login).
-     * The token auth + dangerouslyDisableDeviceAuth combo is required because
-     * the Control UI's "skip device identity" path checks sharedAuthOk,
-     * which only passes when gateway auth (token/password) succeeds.
+     * auth.mode is "none" because the Control UI's device-token
+     * negotiation can fail on fresh installs when no device token is
+     * stored, causing token_missing rejections.  The combination of
+     * auth=none + dangerouslyDisableDeviceAuth + allowInsecureAuth
+     * lets any local client connect without authentication.
      */
     fun configureOpenClawAuth() {
         val paths = BootstrapInstaller.getPaths(context)
@@ -703,8 +750,7 @@ H3
             |      "dangerouslyDisableDeviceAuth": true
             |    },
             |    "auth": {
-            |      "mode": "token",
-            |      "token": "$OPENCLAW_GATEWAY_TOKEN"
+            |      "mode": "none"
             |    }
             |  },
             |  "agents": {

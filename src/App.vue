@@ -144,9 +144,8 @@ import { useDesktopState } from './composables/useDesktopState'
 import type { ReasoningEffort, ThreadScrollState } from './types/codex'
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = 'codex-web-local.sidebar-collapsed.v1'
-const OPENCLAW_GATEWAY_TOKEN = 'openclaw-android-local-token'
 const openClawDashboardUrl = computed(() => {
-  return `http://localhost:19001/?gatewayUrl=ws://localhost:18789&token=${OPENCLAW_GATEWAY_TOKEN}`
+  return `http://localhost:19001/?gatewayUrl=ws://localhost:18789`
 })
 
 const {
