@@ -18,9 +18,13 @@
 
 <br />
 
-[Download APK](https://friuns2.github.io/codex-app-android/) ·
+[Download APK](https://friuns2.github.io/openclaw-android-assistant/) ·
 [OpenClaw Docs](https://docs.openclaw.ai) ·
 [Project Spec](PROJECT_SPEC.md)
+
+<br />
+
+<img src="screenshots/screenshot.png" width="280" alt="OpenClaw Dashboard" /> &nbsp;&nbsp; <img src="screenshots/screenshot2.png" width="280" alt="Codex Coding Agent" />
 
 </div>
 
@@ -69,7 +73,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb shell am start -n com.codex.mobile/.MainActivity
 ```
 
-Or [download the latest APK](https://friuns2.github.io/codex-app-android/) directly.
+Or [download the latest APK](https://friuns2.github.io/openclaw-android-assistant/) directly.
 
 ---
 
@@ -266,6 +270,6 @@ src/                                  # codex-web-local (TypeScript + Vue)
 
 **Two AI agents. One APK. Your pocket.**
 
-[Download APK](https://friuns2.github.io/codex-app-android/) · [OpenClaw Docs](https://docs.openclaw.ai) · [Project Spec](PROJECT_SPEC.md)
+[Download APK](https://friuns2.github.io/openclaw-android-assistant/) · [OpenClaw Docs](https://docs.openclaw.ai) · [Project Spec](PROJECT_SPEC.md)
 
 </div>
