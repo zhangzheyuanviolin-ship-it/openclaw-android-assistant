@@ -139,6 +139,16 @@ class MainActivity : AppCompatActivity() {
         }
         updateStatus("Environment ready")
 
+        // Step 1b: Install proot (needed for dpkg/apt-get path remapping)
+        if (!serverManager.isProotInstalled()) {
+            updateStatus("Installing proot…", "Needed for package management")
+            val prootOk = serverManager.installProot { msg -> updateDetail(msg) }
+            if (!prootOk) {
+                throw RuntimeException("Failed to install proot")
+            }
+        }
+        updateStatus("proot ready")
+
         // Step 2: Install Node.js
         if (!serverManager.isNodeInstalled()) {
             updateStatus("Installing Node.js (first run)…", "This may take a few minutes")
@@ -148,6 +158,15 @@ class MainActivity : AppCompatActivity() {
             }
         }
         updateStatus("Node.js ready")
+
+        // Step 2b: Install Python
+        if (!serverManager.isPythonInstalled()) {
+            updateStatus("Installing Python…")
+            val pyOk = serverManager.installPython { msg -> updateDetail(msg) }
+            if (!pyOk) {
+                Log.w(TAG, "Python install failed — continuing without it")
+            }
+        }
 
         // Step 3: Install Codex CLI
         if (!serverManager.isCodexInstalled()) {

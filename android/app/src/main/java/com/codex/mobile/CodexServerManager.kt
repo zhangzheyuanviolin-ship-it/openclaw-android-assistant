@@ -79,6 +79,11 @@ class CodexServerManager(private val context: Context) {
 
     // ── Install checks ─────────────────────────────────────────────────────
 
+    fun isProotInstalled(): Boolean {
+        val paths = BootstrapInstaller.getPaths(context)
+        return File(paths.prefixDir, "bin/proot").exists()
+    }
+
     fun isNodeInstalled(): Boolean {
         val paths = BootstrapInstaller.getPaths(context)
         return File(paths.prefixDir, "bin/node").exists()
@@ -175,6 +180,123 @@ WEOF
         runInPrefix(fixCmd, onOutput = { onProgress(it) })
 
         return isNodeInstalled()
+    }
+
+    /**
+     * Install proot from the Termux repository. proot uses ptrace to
+     * intercept filesystem syscalls and remap hardcoded Termux paths
+     * (e.g. /data/data/com.termux/files/usr) to our actual prefix,
+     * enabling dpkg, apt-get install, and other tools that have
+     * compiled-in path references.
+     */
+    fun installProot(onProgress: (String) -> Unit): Boolean {
+        val paths = BootstrapInstaller.getPaths(context)
+        val prefix = paths.prefixDir
+        val termuxPrefix = "/data/data/com.termux/files/usr"
+
+        onProgress("Downloading proot…")
+
+        val downloadCmd = """
+            cd $prefix/tmp &&
+            apt-get update --allow-insecure-repositories 2>&1;
+            apt-get download --allow-unauthenticated proot libtalloc 2>&1
+        """.trimIndent()
+
+        val dlCode = runInPrefix(downloadCmd, onOutput = { onProgress(it) })
+        if (dlCode != 0) {
+            Log.e(TAG, "apt-get download proot failed with code $dlCode")
+            return false
+        }
+
+        onProgress("Extracting proot…")
+        val extractCmd = """
+            cd $prefix/tmp &&
+            mkdir -p _proot_stage &&
+            for deb in proot*.deb libtalloc*.deb; do
+                [ -f "${'$'}deb" ] && dpkg-deb -x "${'$'}deb" _proot_stage/ 2>&1
+            done &&
+            if [ -d "_proot_stage$termuxPrefix" ]; then
+                cp -a _proot_stage$termuxPrefix/* "$prefix/" 2>&1
+            elif [ -d "_proot_stage/usr" ]; then
+                cp -a _proot_stage/usr/* "$prefix/" 2>&1
+            fi &&
+            chmod 700 "$prefix/bin/proot" 2>/dev/null
+            rm -rf _proot_stage proot*.deb libtalloc*.deb 2>/dev/null
+            echo "proot installed"
+        """.trimIndent()
+
+        val extractCode = runInPrefix(extractCmd, onOutput = { onProgress(it) })
+        if (extractCode != 0) {
+            Log.e(TAG, "proot extract failed with code $extractCode")
+            return false
+        }
+
+        return isProotInstalled()
+    }
+
+    fun isPythonInstalled(): Boolean {
+        val paths = BootstrapInstaller.getPaths(context)
+        return File(paths.prefixDir, "bin/python3").exists() ||
+            File(paths.prefixDir, "bin/python").exists()
+    }
+
+    /**
+     * Install Python using proot to handle dpkg's hardcoded Termux paths.
+     * proot bind-mounts our prefix onto the compiled-in Termux prefix so
+     * dpkg postinst scripts and shared library lookups resolve correctly.
+     */
+    fun installPython(onProgress: (String) -> Unit): Boolean {
+        val paths = BootstrapInstaller.getPaths(context)
+        val prefix = paths.prefixDir
+        val termuxPrefix = "/data/data/com.termux/files/usr"
+
+        onProgress("Downloading Python packages…")
+
+        val downloadCmd = """
+            cd $prefix/tmp &&
+            apt-get update --allow-insecure-repositories 2>&1;
+            apt-get download --allow-unauthenticated python python-pip 2>&1
+        """.trimIndent()
+
+        val dlCode = runInPrefix(downloadCmd, onOutput = { onProgress(it) })
+        if (dlCode != 0) {
+            Log.e(TAG, "apt-get download python failed with code $dlCode")
+        }
+
+        onProgress("Extracting Python…")
+        val extractCmd = """
+            cd $prefix/tmp &&
+            mkdir -p _python_stage &&
+            for deb in python*.deb; do
+                [ -f "${'$'}deb" ] && echo "Extracting ${'$'}deb..." && dpkg-deb -x "${'$'}deb" _python_stage/ 2>&1
+            done &&
+            if [ -d "_python_stage$termuxPrefix" ]; then
+                cp -a _python_stage$termuxPrefix/* "$prefix/" 2>&1
+            elif [ -d "_python_stage/usr" ]; then
+                cp -a _python_stage/usr/* "$prefix/" 2>&1
+            fi &&
+            chmod 700 "$prefix/bin/python"* 2>/dev/null
+            chmod 700 "$prefix/bin/pip"* 2>/dev/null
+            rm -rf _python_stage python*.deb 2>/dev/null
+            echo "Python installed"
+        """.trimIndent()
+
+        val extractCode = runInPrefix(extractCmd, onOutput = { onProgress(it) })
+        if (extractCode != 0) {
+            Log.e(TAG, "Python extract failed with code $extractCode")
+            return false
+        }
+
+        // Create python3 wrapper to handle shebang issues
+        val fixCmd = """
+            if [ -f "$prefix/bin/python3" ] && [ ! -f "$prefix/bin/python" ]; then
+                ln -sf python3 "$prefix/bin/python"
+            fi
+            echo "Python ready"
+        """.trimIndent()
+        runInPrefix(fixCmd, onOutput = { onProgress(it) })
+
+        return isPythonInstalled()
     }
 
     fun installCodex(onProgress: (String) -> Unit): Boolean {
