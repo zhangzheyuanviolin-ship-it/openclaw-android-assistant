@@ -16,3 +16,4 @@ app/src/main/assets/server-bundle/
 
 # Gradle wrapper jar (downloaded automatically)
 gradle/wrapper/gradle-wrapper.jar
+/.kotlin/

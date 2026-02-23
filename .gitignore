@@ -5,3 +5,4 @@ dist-cli/
 PROJECT_SPEC.md
 codex_tools_from_notices.txt
 package-lock.json
+/output/

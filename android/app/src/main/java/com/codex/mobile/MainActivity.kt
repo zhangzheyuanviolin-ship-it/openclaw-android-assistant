@@ -168,6 +168,23 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        // Step 2c: Install bionic-compat.js (Android platform shim for Node.js)
+        serverManager.ensureBionicCompat()
+
+        // Step 2d: Install OpenClaw
+        if (!serverManager.isOpenClawInstalled()) {
+            updateStatus("Installing build dependencies…")
+            serverManager.installOpenClawDeps { msg -> updateDetail(msg) }
+
+            updateStatus("Installing OpenClaw…", "This may take several minutes")
+            val openclawOk = serverManager.installOpenClaw { msg -> updateDetail(msg) }
+            if (!openclawOk) {
+                Log.w(TAG, "OpenClaw install failed — continuing without it")
+            } else {
+                updateStatus("OpenClaw installed")
+            }
+        }
+
         // Step 3: Install Codex CLI
         if (!serverManager.isCodexInstalled()) {
             updateStatus("Installing Codex CLI…", "This may take a few minutes")

@@ -299,6 +299,370 @@ WEOF
         return isPythonInstalled()
     }
 
+    // ── OpenClaw ─────────────────────────────────────────────────────────────
+
+    fun isOpenClawInstalled(): Boolean {
+        val paths = BootstrapInstaller.getPaths(context)
+        val npmRoot = "${paths.prefixDir}/lib/node_modules"
+        return File(npmRoot, "openclaw/package.json").exists()
+    }
+
+    /**
+     * Install bionic-compat.js from APK assets into the home directory.
+     * This shim patches process.platform, os.cpus(), and
+     * os.networkInterfaces() for Android compatibility.
+     * Loaded via NODE_OPTIONS="-r <path>/bionic-compat.js".
+     */
+    fun ensureBionicCompat() {
+        val paths = BootstrapInstaller.getPaths(context)
+        val patchDir = File(paths.homeDir, ".openclaw-android/patches")
+        patchDir.mkdirs()
+
+        val target = File(patchDir, "bionic-compat.js")
+        try {
+            context.assets.open("bionic-compat.js").use { input ->
+                target.outputStream().use { output -> input.copyTo(output) }
+            }
+            Log.i(TAG, "bionic-compat.js installed to $target")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to extract bionic-compat.js: ${e.message}")
+        }
+    }
+
+    /**
+     * Install all Termux packages needed for OpenClaw's native module
+     * builds. This includes git, make, cmake, clang, lld (linker),
+     * NDK sysroot/multilib, and all transitive shared library deps.
+     * Uses dpkg-deb manual extraction (same approach as Node.js install).
+     */
+    fun installOpenClawDeps(onProgress: (String) -> Unit): Boolean {
+        val paths = BootstrapInstaller.getPaths(context)
+        val prefix = paths.prefixDir
+        val termuxPrefix = "/data/data/com.termux/files/usr"
+
+        onProgress("Downloading build dependencies…")
+
+        // All packages needed for native compilation (koffi) in one batch.
+        // Split into groups to avoid apt-get download failures on missing pkgs.
+        val pkgGroups = listOf(
+            "git make cmake clang binutils lld",
+            "libllvm libedit libffi ndk-sysroot ndk-multilib libcompiler-rt",
+            "libarchive libxml2 liblzma libcurl libuv libnghttp2 libnghttp3",
+            "rhash jsoncpp",
+        )
+
+        for (group in pkgGroups) {
+            val dlCode = runInPrefix(
+                "cd $prefix/tmp && apt-get download --allow-unauthenticated $group 2>&1",
+                onOutput = { onProgress(it) },
+            )
+            if (dlCode != 0) {
+                Log.w(TAG, "apt-get download ($group) failed with code $dlCode (non-fatal)")
+            }
+        }
+
+        onProgress("Extracting build dependencies…")
+        val extractCmd = """
+            cd $prefix/tmp &&
+            mkdir -p _deps_stage &&
+            for deb in *.deb; do
+                [ -f "${'$'}deb" ] && echo "Extracting ${'$'}deb..." && dpkg-deb -x "${'$'}deb" _deps_stage/ 2>&1
+            done &&
+            if [ -d "_deps_stage$termuxPrefix" ]; then
+                cp -a _deps_stage$termuxPrefix/* "$prefix/" 2>&1
+            elif [ -d "_deps_stage/usr" ]; then
+                cp -a _deps_stage/usr/* "$prefix/" 2>&1
+            fi &&
+            rm -rf _deps_stage *.deb 2>/dev/null
+            echo "Build deps installed"
+        """.trimIndent()
+
+        val extractCode = runInPrefix(extractCmd, onOutput = { onProgress(it) })
+        if (extractCode != 0) {
+            Log.w(TAG, "Deps extract failed with code $extractCode (non-fatal)")
+        }
+
+        // Create symlinks for tools that expect different names
+        runInPrefix("""
+            [ ! -f "$prefix/bin/ar" ] && [ -f "$prefix/bin/llvm-ar" ] && ln -sf llvm-ar "$prefix/bin/ar"
+            [ ! -f "$prefix/bin/ld" ] || [ -L "$prefix/bin/ld" ] && ln -sf ld.lld "$prefix/bin/ld"
+            echo "Symlinks created"
+        """.trimIndent())
+
+        onProgress("Fixing git-core script shebangs…")
+        fixGitCoreShebangs(prefix)
+
+        onProgress("Patching make & cmake binaries…")
+        patchBinaryTermuxPaths(prefix)
+
+        onProgress("Creating header stubs…")
+        createHeaderStubs(prefix)
+
+        return true
+    }
+
+    /**
+     * Fix shebangs in all git-core shell scripts. They ship with
+     * #!/data/data/com.termux/files/usr/bin/sh which doesn't exist
+     * at our actual prefix path.
+     */
+    private fun fixGitCoreShebangs(prefix: String) {
+        val cmd = """
+            cd "$prefix/libexec/git-core" 2>/dev/null || exit 0
+            for f in git-*; do
+                if head -1 "${'$'}f" 2>/dev/null | grep -q "com.termux"; then
+                    sed -i "1s|/data/data/com.termux/files/usr|$prefix|" "${'$'}f"
+                fi
+            done
+            echo "Git shebangs fixed"
+        """.trimIndent()
+        runInPrefix(cmd) { Log.d(TAG, "[fix-shebang] $it") }
+    }
+
+    /**
+     * Binary-patch the `make` and `cmake` ELF binaries to replace the
+     * hardcoded Termux shell paths with /system/bin/sh (null-padded).
+     * Without this, cmake's test-compile step and make's recipe execution
+     * fail with "Permission denied" on the non-existent Termux sh path.
+     */
+    private fun patchBinaryTermuxPaths(prefix: String) {
+        val patchScript = """
+            cat > "$prefix/tmp/_patchbin.py" << 'PYEOF'
+import sys
+with open(sys.argv[1], "rb") as f:
+    data = f.read()
+pairs = [
+    (b"/data/data/com.termux/files/usr/bin/sh", b"/system/bin/sh"),
+    (b"/data/data/com.termux/files/usr/bin/bash", b"/system/bin/sh"),
+]
+for old, new in pairs:
+    padded = new + b"\x00" * (len(old) - len(new))
+    data = data.replace(old, padded)
+with open(sys.argv[1], "wb") as f:
+    f.write(data)
+print("patched " + sys.argv[1])
+PYEOF
+            for bin in "$prefix/bin/make" "$prefix/bin/cmake"; do
+                [ -f "${'$'}bin" ] && python3 "$prefix/tmp/_patchbin.py" "${'$'}bin" && chmod 700 "${'$'}bin"
+            done
+            rm -f "$prefix/tmp/_patchbin.py"
+        """.trimIndent()
+        runInPrefix(patchScript) { Log.d(TAG, "[patch-bin] $it") }
+    }
+
+    /**
+     * Create stub headers needed for native builds on Android:
+     * - android/api-level.h — cmake system detection
+     * - spawn.h — POSIX spawn (not available on older Android NDK)
+     * - renameat2_shim.h — syscall wrapper (API 30+ only in bionic)
+     */
+    private fun createHeaderStubs(prefix: String) {
+        val cmd = """
+            mkdir -p "$prefix/include/android"
+
+            cat > "$prefix/include/android/api-level.h" << 'H1'
+#pragma once
+#define __ANDROID_API__ 24
+H1
+
+            cat > "$prefix/include/spawn.h" << 'H2'
+#pragma once
+#include <sys/types.h>
+typedef struct { short __flags; pid_t __pgroup; } posix_spawnattr_t;
+typedef struct { int __allocated; int __used; void **__actions; } posix_spawn_file_actions_t;
+static inline int posix_spawn(pid_t *p,const char *path,const posix_spawn_file_actions_t *fa,const posix_spawnattr_t *a,char *const argv[],char *const envp[]){return -1;}
+static inline int posix_spawnp(pid_t *p,const char *file,const posix_spawn_file_actions_t *fa,const posix_spawnattr_t *a,char *const argv[],char *const envp[]){return -1;}
+static inline int posix_spawnattr_init(posix_spawnattr_t *a){return 0;}
+static inline int posix_spawnattr_destroy(posix_spawnattr_t *a){return 0;}
+static inline int posix_spawnattr_setflags(posix_spawnattr_t *a,short f){a->__flags=f;return 0;}
+static inline int posix_spawnattr_setpgroup(posix_spawnattr_t *a,pid_t g){a->__pgroup=g;return 0;}
+static inline int posix_spawn_file_actions_init(posix_spawn_file_actions_t *fa){return 0;}
+static inline int posix_spawn_file_actions_destroy(posix_spawn_file_actions_t *fa){return 0;}
+static inline int posix_spawn_file_actions_adddup2(posix_spawn_file_actions_t *fa,int o,int n){return 0;}
+static inline int posix_spawn_file_actions_addclose(posix_spawn_file_actions_t *fa,int f){return 0;}
+#define POSIX_SPAWN_SETPGROUP 2
+#define POSIX_SPAWN_SETSIGDEF 4
+#define POSIX_SPAWN_SETSIGMASK 8
+H2
+
+            cat > "$prefix/include/renameat2_shim.h" << 'H3'
+#pragma once
+#include <sys/syscall.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <linux/fs.h>
+static inline int renameat2(int olddirfd, const char *oldpath, int newdirfd, const char *newpath, unsigned int flags) {
+    return syscall(__NR_renameat2, olddirfd, oldpath, newdirfd, newpath, flags);
+}
+H3
+            echo "Header stubs created"
+        """.trimIndent()
+        runInPrefix(cmd) { Log.d(TAG, "[headers] $it") }
+    }
+
+    /**
+     * Install OpenClaw via npm with --ignore-scripts (to skip the koffi
+     * native build during npm install), then build koffi separately with
+     * the correct CXXFLAGS/LDFLAGS. Finally, apply Termux path patches.
+     *
+     * Based on https://github.com/AidanPark/openclaw-android
+     */
+    fun installOpenClaw(onProgress: (String) -> Unit): Boolean {
+        val paths = BootstrapInstaller.getPaths(context)
+        val prefix = paths.prefixDir
+        val npmCli = "$prefix/lib/node_modules/npm/bin/npm-cli.js"
+
+        // Create directories OpenClaw expects
+        runInPrefix("mkdir -p $prefix/tmp/openclaw ${paths.homeDir}/.openclaw-android/patches ${paths.homeDir}/.openclaw")
+
+        // Install systemctl stub (OpenClaw checks for systemd)
+        val systemctlStub = File(prefix, "bin/systemctl")
+        if (!systemctlStub.exists()) {
+            systemctlStub.writeText(
+                "#!/data/user/0/com.codex.mobile/files/usr/bin/sh\n" +
+                    "exit 0\n"
+            )
+            systemctlStub.setExecutable(true)
+            Log.i(TAG, "Created systemctl stub")
+        }
+
+        // Configure git to use HTTPS instead of SSH (ssh not available in prefix)
+        configureGitHttps(paths)
+
+        // Clean npm cache to avoid stale git clones
+        runInPrefix("node $npmCli cache clean --force 2>&1") { Log.d(TAG, "[npm-cache] $it") }
+
+        onProgress("Installing OpenClaw (npm)…")
+        val installCode = runInPrefix(
+            "node $npmCli install -g --ignore-scripts openclaw@latest 2>&1",
+            onOutput = { onProgress(it) },
+        )
+        if (installCode != 0) {
+            Log.e(TAG, "npm install openclaw failed with code $installCode")
+            return false
+        }
+
+        // Build koffi native module separately
+        onProgress("Building koffi native module…")
+        val koffiBuilt = buildKoffi(prefix, paths.homeDir, onProgress)
+        if (!koffiBuilt) {
+            Log.w(TAG, "koffi build failed (OpenClaw may have limited functionality)")
+        }
+
+        // Patch hardcoded paths in the installed JS files
+        onProgress("Patching OpenClaw paths…")
+        patchOpenClawPaths()
+
+        return isOpenClawInstalled()
+    }
+
+    /**
+     * Write git insteadOf rules so all SSH GitHub URLs are rewritten
+     * to HTTPS (we don't have ssh in our prefix).
+     */
+    private fun configureGitHttps(paths: BootstrapInstaller.Paths) {
+        val gitconfigFile = File(paths.homeDir, ".gitconfig")
+        val desired = """
+            |[url "https://github.com/"]
+            |	insteadOf = ssh://git@github.com/
+            |	insteadOf = git@github.com:
+        """.trimMargin()
+        val existing = if (gitconfigFile.exists()) gitconfigFile.readText() else ""
+        if (!existing.contains("insteadOf = ssh://git@github.com")) {
+            gitconfigFile.appendText("\n$desired\n")
+        }
+    }
+
+    /**
+     * Build the koffi native FFI module inside the already-installed
+     * openclaw package. Uses cmake + make + clang with our patched
+     * binaries and header stubs.
+     */
+    private fun buildKoffi(prefix: String, homeDir: String, onProgress: (String) -> Unit): Boolean {
+        val koffiDir = "$prefix/lib/node_modules/openclaw/node_modules/koffi"
+        if (!File(koffiDir, "src/cnoke/cnoke.js").exists()) {
+            Log.w(TAG, "koffi cnoke.js not found, skipping build")
+            return false
+        }
+
+        val shimHeader = "$prefix/include/renameat2_shim.h"
+        val buildCmd = """
+            export CC=clang CXX=clang++ \
+                CFLAGS="-include $shimHeader" \
+                CXXFLAGS="-include $shimHeader" \
+                LDFLAGS="-fuse-ld=lld" \
+                SHELL=/system/bin/sh &&
+            rm -rf "$koffiDir/build" &&
+            cd "$koffiDir" &&
+            node src/cnoke/cnoke.js -p . -d src/koffi --prebuild 2>&1
+        """.trimIndent()
+
+        val code = runInPrefix(buildCmd, onOutput = { onProgress(it) })
+        if (code != 0) {
+            Log.e(TAG, "koffi build failed with code $code")
+            return false
+        }
+
+        Log.i(TAG, "koffi native module built successfully")
+        return true
+    }
+
+    /**
+     * Replace hardcoded Linux paths in OpenClaw's JS files with our
+     * Termux prefix equivalents, and fix the openclaw.mjs shebang.
+     * Mirrors patch-paths.sh from openclaw-android.
+     */
+    private fun patchOpenClawPaths() {
+        val paths = BootstrapInstaller.getPaths(context)
+        val prefix = paths.prefixDir
+        val openclawDir = "$prefix/lib/node_modules/openclaw"
+
+        val patchCmd = """
+            ODIR="$openclawDir"
+            [ ! -d "${'$'}ODIR" ] && echo "OpenClaw dir not found" && exit 0
+
+            # Fix the openclaw.mjs shebang
+            if [ -f "${'$'}ODIR/openclaw.mjs" ]; then
+                sed -i "1s|#!/usr/bin/env node|#!$prefix/bin/node|" "${'$'}ODIR/openclaw.mjs"
+            fi
+
+            # Patch /tmp -> $prefix/tmp
+            for f in ${'$'}(grep -rl '/tmp' "${'$'}ODIR" --include='*.js' --include='*.mjs' --include='*.cjs' 2>/dev/null); do
+                sed -i "s|\"\/tmp/|\"$prefix/tmp/|g" "${'$'}f"
+                sed -i "s|'\/tmp/|'$prefix/tmp/|g" "${'$'}f"
+                sed -i "s|\`\/tmp/|\`$prefix/tmp/|g" "${'$'}f"
+                sed -i "s|\"\/tmp\"|\"$prefix/tmp\"|g" "${'$'}f"
+                sed -i "s|'\/tmp'|'$prefix/tmp'|g" "${'$'}f"
+            done
+
+            # Patch /bin/sh -> $prefix/bin/sh
+            for f in ${'$'}(grep -rl '"/bin/sh"' "${'$'}ODIR" --include='*.js' --include='*.mjs' --include='*.cjs' 2>/dev/null) \
+                     ${'$'}(grep -rl "'/bin/sh'" "${'$'}ODIR" --include='*.js' --include='*.mjs' --include='*.cjs' 2>/dev/null); do
+                sed -i "s|\"\/bin\/sh\"|\"$prefix/bin/sh\"|g" "${'$'}f"
+                sed -i "s|'\/bin\/sh'|'$prefix/bin/sh'|g" "${'$'}f"
+            done
+
+            # Patch /bin/bash -> $prefix/bin/bash
+            for f in ${'$'}(grep -rl '"/bin/bash"' "${'$'}ODIR" --include='*.js' --include='*.mjs' --include='*.cjs' 2>/dev/null) \
+                     ${'$'}(grep -rl "'/bin/bash'" "${'$'}ODIR" --include='*.js' --include='*.mjs' --include='*.cjs' 2>/dev/null); do
+                sed -i "s|\"\/bin\/bash\"|\"$prefix/bin/bash\"|g" "${'$'}f"
+                sed -i "s|'\/bin\/bash'|'$prefix/bin/bash'|g" "${'$'}f"
+            done
+
+            # Patch /usr/bin/env -> $prefix/bin/env
+            for f in ${'$'}(grep -rl '"/usr/bin/env"' "${'$'}ODIR" --include='*.js' --include='*.mjs' --include='*.cjs' 2>/dev/null) \
+                     ${'$'}(grep -rl "'/usr/bin/env'" "${'$'}ODIR" --include='*.js' --include='*.mjs' --include='*.cjs' 2>/dev/null); do
+                sed -i "s|\"\/usr\/bin\/env\"|\"$prefix/bin/env\"|g" "${'$'}f"
+                sed -i "s|'\/usr\/bin\/env'|'$prefix/bin/env'|g" "${'$'}f"
+            done
+
+            echo "Path patches applied"
+        """.trimIndent()
+
+        runInPrefix(patchCmd) { Log.d(TAG, "[patch] $it") }
+        Log.i(TAG, "OpenClaw path patches applied")
+    }
+
     fun installCodex(onProgress: (String) -> Unit): Boolean {
         val paths = BootstrapInstaller.getPaths(context)
         val prefix = paths.prefixDir
@@ -774,6 +1138,9 @@ WEOF
     private fun buildEnvironment(
         paths: BootstrapInstaller.Paths,
     ): Map<String, String> {
+        val bionicCompat = "${paths.homeDir}/.openclaw-android/patches/bionic-compat.js"
+        val bionicCompatOpt = if (File(bionicCompat).exists()) " -r $bionicCompat" else ""
+
         return mapOf(
             "PREFIX" to paths.prefixDir,
             "HOME" to paths.homeDir,
@@ -784,6 +1151,9 @@ WEOF
             "TERMUX__PREFIX" to paths.prefixDir,
             "LANG" to "en_US.UTF-8",
             "TMPDIR" to paths.tmpDir,
+            "TMP" to paths.tmpDir,
+            "TEMP" to paths.tmpDir,
+            "PROOT_TMP_DIR" to paths.tmpDir,
             "TERM" to "xterm-256color",
             "ANDROID_DATA" to "/data",
             "ANDROID_ROOT" to "/system",
@@ -793,8 +1163,12 @@ WEOF
             "SSL_CERT_DIR" to "/system/etc/security/cacerts",
             "CURL_CA_BUNDLE" to "${paths.prefixDir}/etc/tls/cert.pem",
             "GIT_SSL_CAINFO" to "${paths.prefixDir}/etc/tls/cert.pem",
+            "GIT_CONFIG_NOSYSTEM" to "1",
+            "GIT_EXEC_PATH" to "${paths.prefixDir}/libexec/git-core",
+            "GIT_TEMPLATE_DIR" to "${paths.prefixDir}/share/git-core/templates",
             "OPENSSL_CONF" to "${paths.prefixDir}/etc/tls/openssl.cnf",
-            "NODE_OPTIONS" to "--openssl-config=${paths.prefixDir}/etc/tls/openssl.cnf",
+            "NODE_OPTIONS" to "--openssl-config=${paths.prefixDir}/etc/tls/openssl.cnf$bionicCompatOpt",
+            "CONTAINER" to "1",
         )
     }
 }
