@@ -21,10 +21,15 @@ class CodexServerManager(private val context: Context) {
         const val SERVER_PORT = 18923
         private const val PROXY_PORT = 18924
         private const val CODEX_VERSION = "0.104.0"
+        const val OPENCLAW_GATEWAY_PORT = 18789
+        const val OPENCLAW_CONTROL_UI_PORT = 19001
+        private const val OPENCLAW_GATEWAY_TOKEN = "openclaw-android-local-token"
     }
 
     private var serverProcess: Process? = null
     private var proxyProcess: Process? = null
+    private var openClawGatewayProcess: Process? = null
+    private var openClawControlUiProcess: Process? = null
 
     val isRunning: Boolean
         get() {
@@ -663,6 +668,232 @@ H3
         Log.i(TAG, "OpenClaw path patches applied")
     }
 
+    /**
+     * Write openclaw.json (gateway token auth + dangerouslyDisableDeviceAuth)
+     * and auth-profiles.json (OpenAI token from existing Codex login).
+     * The token auth + dangerouslyDisableDeviceAuth combo is required because
+     * the Control UI's "skip device identity" path checks sharedAuthOk,
+     * which only passes when gateway auth (token/password) succeeds.
+     */
+    fun configureOpenClawAuth() {
+        val paths = BootstrapInstaller.getPaths(context)
+        val prefix = paths.prefixDir
+        val openclawDir = File(paths.homeDir, ".openclaw")
+        openclawDir.mkdirs()
+
+        val configFile = File(openclawDir, "openclaw.json")
+        val configJson = """
+            |{
+            |  "meta": {
+            |    "lastTouchedVersion": "2026.2.21-2",
+            |    "lastTouchedAt": "${java.time.Instant.now()}"
+            |  },
+            |  "commands": {
+            |    "native": "auto",
+            |    "nativeSkills": "auto",
+            |    "restart": true,
+            |    "ownerDisplay": "raw"
+            |  },
+            |  "gateway": {
+            |    "mode": "local",
+            |    "controlUi": {
+            |      "enabled": true,
+            |      "allowedOrigins": ["http://127.0.0.1:$OPENCLAW_CONTROL_UI_PORT", "http://localhost:$OPENCLAW_CONTROL_UI_PORT"],
+            |      "allowInsecureAuth": true,
+            |      "dangerouslyDisableDeviceAuth": true
+            |    },
+            |    "auth": {
+            |      "mode": "token",
+            |      "token": "$OPENCLAW_GATEWAY_TOKEN"
+            |    }
+            |  },
+            |  "agents": {
+            |    "defaults": {
+            |      "model": {
+            |        "primary": "openai-codex/gpt-5.3-codex"
+            |      }
+            |    }
+            |  }
+            |}
+        """.trimMargin()
+        configFile.writeText(configJson)
+        Log.i(TAG, "Wrote OpenClaw config to $configFile")
+
+        // Copy the Codex access_token into OpenClaw's auth-profiles.json.
+        // The profile needs: version=1, type="token", provider="openai-codex",
+        // and the canonical profile ID "openai-codex:codex-cli".
+        // Must be written to both global and agent-specific directories.
+        val authJson = File(paths.homeDir, ".codex/auth.json")
+        if (authJson.exists()) {
+            val copyScript = """
+                node -e "
+                  const fs = require('fs');
+                  const path = require('path');
+                  const auth = JSON.parse(fs.readFileSync('${'$'}HOME/.codex/auth.json','utf8'));
+                  const token = auth.tokens && auth.tokens.access_token;
+                  if (!token) { console.error('No access_token in codex auth'); process.exit(1); }
+                  const profiles = {
+                    version: 1,
+                    profiles: {
+                      'openai-codex:codex-cli': {
+                        type: 'token',
+                        provider: 'openai-codex',
+                        token: token,
+                        source: 'codex-auth',
+                        createdAt: new Date().toISOString()
+                      },
+                      'openai:codex': {
+                        type: 'token',
+                        provider: 'openai',
+                        token: token,
+                        source: 'codex-auth',
+                        createdAt: new Date().toISOString()
+                      }
+                    },
+                    order: ['openai-codex:codex-cli', 'openai:codex']
+                  };
+                  const json = JSON.stringify(profiles, null, 2);
+                  fs.writeFileSync('${'$'}HOME/.openclaw/auth-profiles.json', json);
+                  const agentDir = '${'$'}HOME/.openclaw/agents/main/agent';
+                  fs.mkdirSync(agentDir, { recursive: true });
+                  fs.writeFileSync(path.join(agentDir, 'auth-profiles.json'), json);
+                  console.log('OpenClaw auth-profiles.json written (global + agent)');
+                " 2>&1
+            """.trimIndent()
+            runInPrefix(copyScript) { Log.d(TAG, "[openclaw-auth] $it") }
+        } else {
+            Log.w(TAG, "Codex auth.json not found — OpenClaw will lack API credentials")
+        }
+    }
+
+    /**
+     * Start the OpenClaw WebSocket gateway. Requires openclaw.json to be
+     * configured first via [configureOpenClawAuth].
+     */
+    fun startOpenClawGateway(): Boolean {
+        if (openClawGatewayProcess != null) {
+            try {
+                openClawGatewayProcess!!.exitValue()
+                openClawGatewayProcess = null
+            } catch (_: IllegalThreadStateException) {
+                Log.i(TAG, "OpenClaw gateway already running")
+                return true
+            }
+        }
+
+        val paths = BootstrapInstaller.getPaths(context)
+        val env = buildEnvironment(paths)
+        val shell = "${paths.prefixDir}/bin/sh"
+        val cmd = "exec openclaw gateway run --force --port $OPENCLAW_GATEWAY_PORT 2>&1"
+
+        val pb = ProcessBuilder(shell, "-c", cmd)
+        pb.environment().clear()
+        pb.environment().putAll(env)
+        pb.directory(File(paths.homeDir))
+        pb.redirectErrorStream(true)
+
+        val proc = pb.start()
+        openClawGatewayProcess = proc
+
+        Thread {
+            val reader = BufferedReader(InputStreamReader(proc.inputStream))
+            var line = reader.readLine()
+            while (line != null) {
+                Log.d(TAG, "[openclaw-gw] $line")
+                line = reader.readLine()
+            }
+            Log.i(TAG, "OpenClaw gateway exited with code: ${proc.waitFor()}")
+        }.start()
+
+        Thread.sleep(5000)
+        Log.i(TAG, "OpenClaw gateway started on port $OPENCLAW_GATEWAY_PORT")
+        return true
+    }
+
+    /**
+     * Start a lightweight Node.js static file server to serve the OpenClaw
+     * Control UI on [OPENCLAW_CONTROL_UI_PORT]. The UI assets live inside
+     * the installed openclaw npm package at dist/control-ui/.
+     */
+    fun startOpenClawControlUiServer(): Boolean {
+        if (openClawControlUiProcess != null) {
+            try {
+                openClawControlUiProcess!!.exitValue()
+                openClawControlUiProcess = null
+            } catch (_: IllegalThreadStateException) {
+                Log.i(TAG, "OpenClaw Control UI server already running")
+                return true
+            }
+        }
+
+        val paths = BootstrapInstaller.getPaths(context)
+        val env = buildEnvironment(paths)
+        val prefix = paths.prefixDir
+        val controlUiRoot = "$prefix/lib/node_modules/openclaw/dist/control-ui"
+
+        if (!File(controlUiRoot).exists()) {
+            Log.w(TAG, "OpenClaw control-ui directory not found at $controlUiRoot")
+            return false
+        }
+
+        val shell = "${paths.prefixDir}/bin/sh"
+        val serverScript = """
+            node -e "
+              const http = require('http');
+              const fs = require('fs');
+              const path = require('path');
+              const root = '$controlUiRoot';
+              const mimeTypes = {
+                '.html':'text/html','.js':'application/javascript',
+                '.css':'text/css','.json':'application/json',
+                '.svg':'image/svg+xml','.png':'image/png',
+                '.woff2':'font/woff2','.woff':'font/woff',
+              };
+              http.createServer((req, res) => {
+                let url = req.url.split('?')[0];
+                if (url === '/') url = '/index.html';
+                const fp = path.join(root, url);
+                if (!fp.startsWith(root)) { res.writeHead(403); return res.end(); }
+                fs.readFile(fp, (err, data) => {
+                  if (err) {
+                    fs.readFile(path.join(root,'index.html'), (e2, d2) => {
+                      res.writeHead(200, {'Content-Type':'text/html'});
+                      res.end(d2);
+                    });
+                    return;
+                  }
+                  const ext = path.extname(fp);
+                  res.writeHead(200, {'Content-Type': mimeTypes[ext]||'application/octet-stream'});
+                  res.end(data);
+                });
+              }).listen($OPENCLAW_CONTROL_UI_PORT, '127.0.0.1', () => console.log('Control UI on port $OPENCLAW_CONTROL_UI_PORT'));
+            " 2>&1
+        """.trimIndent()
+
+        val pb = ProcessBuilder(shell, "-c", "exec $serverScript")
+        pb.environment().clear()
+        pb.environment().putAll(env)
+        pb.directory(File(paths.homeDir))
+        pb.redirectErrorStream(true)
+
+        val proc = pb.start()
+        openClawControlUiProcess = proc
+
+        Thread {
+            val reader = BufferedReader(InputStreamReader(proc.inputStream))
+            var line = reader.readLine()
+            while (line != null) {
+                Log.d(TAG, "[openclaw-ui] $line")
+                line = reader.readLine()
+            }
+            Log.i(TAG, "OpenClaw Control UI server exited with code: ${proc.waitFor()}")
+        }.start()
+
+        Thread.sleep(1000)
+        Log.i(TAG, "OpenClaw Control UI server started on port $OPENCLAW_CONTROL_UI_PORT")
+        return true
+    }
+
     fun installCodex(onProgress: (String) -> Unit): Boolean {
         val paths = BootstrapInstaller.getPaths(context)
         val prefix = paths.prefixDir
@@ -1079,8 +1310,16 @@ WEOF
             Thread.currentThread().interrupt()
         }
 
+        stopOpenClaw()
         stopProxy()
         Log.i(TAG, "Server stopped")
+    }
+
+    private fun stopOpenClaw() {
+        openClawGatewayProcess?.destroy()
+        openClawGatewayProcess = null
+        openClawControlUiProcess?.destroy()
+        openClawControlUiProcess = null
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────

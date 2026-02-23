@@ -53,6 +53,17 @@
           @select="onSelectThread"
           @archive="onArchiveThread" @start-new-thread="onStartNewThread" @rename-project="onRenameProject"
           @remove-project="onRemoveProject" @reorder-project="onReorderProject" />
+
+        <a
+          v-if="!isSidebarCollapsed"
+          class="openclaw-dashboard-link"
+          :href="openClawDashboardUrl"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <IconTablerExternalLink class="openclaw-dashboard-icon" />
+          <span class="openclaw-dashboard-label">OpenClaw Dashboard</span>
+        </a>
       </section>
     </template>
 
@@ -128,10 +139,16 @@ import ComposerDropdown from './components/content/ComposerDropdown.vue'
 import SidebarThreadControls from './components/sidebar/SidebarThreadControls.vue'
 import IconTablerSearch from './components/icons/IconTablerSearch.vue'
 import IconTablerX from './components/icons/IconTablerX.vue'
+import IconTablerExternalLink from './components/icons/IconTablerExternalLink.vue'
 import { useDesktopState } from './composables/useDesktopState'
 import type { ReasoningEffort, ThreadScrollState } from './types/codex'
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = 'codex-web-local.sidebar-collapsed.v1'
+const OPENCLAW_GATEWAY_TOKEN = 'openclaw-android-local-token'
+const openClawDashboardUrl = computed(() => {
+  const host = window.location.hostname || '127.0.0.1'
+  return `http://${host}:19001/?gatewayUrl=ws://${host}:18789&token=${OPENCLAW_GATEWAY_TOKEN}`
+})
 
 const {
   projectGroups,
@@ -572,6 +589,18 @@ async function submitFirstMessageForNewThread(text: string): Promise<void> {
 
 .new-thread-folder-dropdown :deep(.composer-dropdown-chevron) {
   @apply h-5 w-5 mt-0;
+}
+
+.openclaw-dashboard-link {
+  @apply mt-auto mx-2 mb-1 flex items-center gap-2 rounded-md px-2.5 py-2 text-sm font-medium text-orange-700 bg-orange-50 border border-orange-200 transition no-underline hover:bg-orange-100 hover:border-orange-300;
+}
+
+.openclaw-dashboard-icon {
+  @apply w-4 h-4 shrink-0;
+}
+
+.openclaw-dashboard-label {
+  @apply truncate;
 }
 
 </style>

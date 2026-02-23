@@ -255,21 +255,33 @@ class MainActivity : AppCompatActivity() {
         }
         updateStatus("API verified")
 
-        // Step 7: Start web server
+        // Step 7: Configure and start OpenClaw
+        if (serverManager.isOpenClawInstalled()) {
+            updateStatus("Configuring OpenClaw…")
+            serverManager.configureOpenClawAuth()
+
+            updateStatus("Starting OpenClaw gateway…")
+            serverManager.startOpenClawGateway()
+
+            updateStatus("Starting OpenClaw Control UI…")
+            serverManager.startOpenClawControlUiServer()
+        }
+
+        // Step 8: Start web server
         updateStatus("Starting server…")
         val started = serverManager.startServer()
         if (!started) {
             throw RuntimeException("Failed to start server")
         }
 
-        // Step 8: Wait for ready
+        // Step 9: Wait for ready
         updateStatus("Waiting for server…")
         val ready = serverManager.waitForServer(timeoutMs = 90_000)
         if (!ready) {
             throw RuntimeException("Server did not start in time")
         }
 
-        // Step 9: Show web UI
+        // Step 10: Show web UI
         runOnUiThread {
             showLoading(false)
             webView.visibility = View.VISIBLE
