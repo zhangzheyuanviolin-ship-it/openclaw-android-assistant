@@ -250,6 +250,19 @@ function reorderStringArray(items: string[], fromIndex: number, toIndex: number)
 }
 
 function areMessageFieldsEqual(first: UiMessage, second: UiMessage): boolean {
+  const firstExec = first.exec
+  const secondExec = second.exec
+  const areExecEqual =
+    (!firstExec && !secondExec) ||
+    (Boolean(firstExec) &&
+      Boolean(secondExec) &&
+      firstExec?.command === secondExec?.command &&
+      firstExec?.cwd === secondExec?.cwd &&
+      firstExec?.status === secondExec?.status &&
+      firstExec?.output === secondExec?.output &&
+      firstExec?.exitCode === secondExec?.exitCode &&
+      firstExec?.durationMs === secondExec?.durationMs)
+
   return (
     first.id === second.id &&
     first.role === second.role &&
@@ -257,7 +270,8 @@ function areMessageFieldsEqual(first: UiMessage, second: UiMessage): boolean {
     areStringArraysEqual(first.images, second.images) &&
     first.messageType === second.messageType &&
     first.rawPayload === second.rawPayload &&
-    first.isUnhandled === second.isUnhandled
+    first.isUnhandled === second.isUnhandled &&
+    areExecEqual
   )
 }
 
@@ -312,6 +326,9 @@ function normalizeMessageText(value: string): string {
 }
 
 function removeRedundantLiveAgentMessages(previous: UiMessage[], incoming: UiMessage[]): UiMessage[] {
+  const incomingIds = new Set(incoming.map((message) => message.id))
+  const prunedById = previous.filter((message) => !incomingIds.has(message.id))
+
   const incomingAssistantTexts = new Set(
     incoming
       .filter((message) => message.role === 'assistant')
@@ -320,10 +337,10 @@ function removeRedundantLiveAgentMessages(previous: UiMessage[], incoming: UiMes
   )
 
   if (incomingAssistantTexts.size === 0) {
-    return previous
+    return prunedById.length === previous.length ? previous : prunedById
   }
 
-  const next = previous.filter((message) => {
+  const next = prunedById.filter((message) => {
     if (message.messageType !== 'agentMessage.live') return true
     const normalized = normalizeMessageText(message.text)
     if (normalized.length === 0) return false
@@ -645,9 +662,9 @@ export function useDesktopState() {
   }
 
   function buildPendingTurnDetails(modelId: string, effort: ReasoningEffort | ''): string[] {
-    const modelLabel = modelId.trim() || 'default'
-    const effortLabel = effort || 'default'
-    return [`Model: ${modelLabel}`, `Thinking: ${effortLabel}`]
+    void modelId
+    void effort
+    return []
   }
 
   async function refreshModelPreferences(): Promise<void> {
@@ -807,7 +824,9 @@ export function useDesktopState() {
     const incomingDetails = activity.details
       .map((line) => sanitizeDisplayText(line))
       .filter((line) => line.length > 0 && line !== normalizedLabel)
-    const mergedDetails = Array.from(new Set([...(previous?.details ?? []), ...incomingDetails])).slice(-3)
+    const shouldReplaceDetails =
+      incomingDetails.length > 0 || (previous ? previous.label !== normalizedLabel : false)
+    const mergedDetails = shouldReplaceDetails ? incomingDetails.slice(0, 3) : (previous?.details ?? [])
     const nextActivity: TurnActivityState = {
       label: normalizedLabel,
       details: mergedDetails,
@@ -1293,6 +1312,85 @@ export function useDesktopState() {
     return null
   }
 
+  function readCommandExecutionStarted(notification: RpcNotification): UiMessage | null {
+    if (notification.method !== 'item/started') return null
+    const params = asRecord(notification.params)
+    const item = asRecord(params?.item)
+    if (!item || item.type !== 'commandExecution') return null
+
+    const id = readString(item.id)
+    const command = readString(item.command)
+    if (!id || !command) return null
+
+    return {
+      id,
+      role: 'system',
+      text: '',
+      messageType: 'commandExecution.live',
+      exec: {
+        command,
+        cwd: readString(item.cwd),
+        status: 'inProgress',
+        output: '',
+      },
+    }
+  }
+
+  function readCommandExecutionDelta(notification: RpcNotification): { messageId: string; delta: string } | null {
+    const params = asRecord(notification.params)
+    if (!params) return null
+
+    if (
+      notification.method === 'item/commandExecution/outputDelta' ||
+      notification.method === 'commandExecution/outputDelta'
+    ) {
+      const itemId = readString(params.itemId)
+      const delta = readString(params.delta)
+      if (!itemId || !delta) return null
+      return { messageId: itemId, delta }
+    }
+
+    return null
+  }
+
+  function readCommandExecutionCompleted(notification: RpcNotification): UiMessage | null {
+    if (notification.method !== 'item/completed') return null
+    const params = asRecord(notification.params)
+    const item = asRecord(params?.item)
+    if (!item || item.type !== 'commandExecution') return null
+
+    const id = readString(item.id)
+    const command = readString(item.command)
+    const status = readString(item.status)
+    if (!id || !command) return null
+    if (
+      status !== 'inProgress' &&
+      status !== 'completed' &&
+      status !== 'failed' &&
+      status !== 'declined'
+    ) {
+      return null
+    }
+
+    const exitCode = readNumber(item.exitCode)
+    const durationMs = readNumber(item.durationMs)
+
+    return {
+      id,
+      role: 'system',
+      text: '',
+      messageType: 'commandExecution.live',
+      exec: {
+        command,
+        cwd: readString(item.cwd),
+        status,
+        output: readString(item.aggregatedOutput),
+        ...(typeof exitCode === 'number' ? { exitCode } : {}),
+        ...(typeof durationMs === 'number' ? { durationMs } : {}),
+      },
+    }
+  }
+
   function isAgentContentEvent(notification: RpcNotification): boolean {
     if (notification.method === 'item/agentMessage/delta') {
       return true
@@ -1397,6 +1495,44 @@ export function useDesktopState() {
     const completedAgentMessage = readAgentMessageCompleted(notification)
     if (completedAgentMessage) {
       upsertLiveAgentMessage(notificationThreadId, completedAgentMessage)
+    }
+
+    const startedCommandExecution = readCommandExecutionStarted(notification)
+    if (startedCommandExecution) {
+      upsertLiveAgentMessage(notificationThreadId, startedCommandExecution)
+    }
+
+    const commandExecutionDelta = readCommandExecutionDelta(notification)
+    if (commandExecutionDelta) {
+      const existing = (liveAgentMessagesByThreadId.value[notificationThreadId] ?? [])
+        .find((message) => message.id === commandExecutionDelta.messageId)
+      if (existing?.exec) {
+        upsertLiveAgentMessage(notificationThreadId, {
+          ...existing,
+          exec: {
+            ...existing.exec,
+            output: `${existing.exec.output}${commandExecutionDelta.delta}`,
+          },
+        })
+      } else {
+        upsertLiveAgentMessage(notificationThreadId, {
+          id: commandExecutionDelta.messageId,
+          role: 'system',
+          text: '',
+          messageType: 'commandExecution.live',
+          exec: {
+            command: '',
+            cwd: '',
+            status: 'inProgress',
+            output: commandExecutionDelta.delta,
+          },
+        })
+      }
+    }
+
+    const completedCommandExecution = readCommandExecutionCompleted(notification)
+    if (completedCommandExecution) {
+      upsertLiveAgentMessage(notificationThreadId, completedCommandExecution)
     }
 
     const startedReasoningItemId = readReasoningStartedItemId(notification)

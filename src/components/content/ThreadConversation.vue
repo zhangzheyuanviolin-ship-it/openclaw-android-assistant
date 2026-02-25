@@ -105,11 +105,38 @@
                 </li>
               </ul>
 
-              <article v-if="message.text.length > 0" class="message-card" :data-role="message.role">
+              <article
+                v-if="message.text.length > 0 || (isCommandExecutionMessage(message) && message.exec)"
+                class="message-card"
+                :data-role="message.role"
+              >
                 <div v-if="message.messageType === 'worked'" class="worked-separator" aria-live="polite">
                   <span class="worked-separator-line" aria-hidden="true" />
                   <p class="worked-separator-text">{{ message.text }}</p>
                   <span class="worked-separator-line" aria-hidden="true" />
+                </div>
+                <div
+                  v-else-if="isCommandExecutionMessage(message) && message.exec"
+                  class="command-step"
+                  :data-status="message.exec.status"
+                >
+                  <div class="command-step-header">
+                    <p class="command-step-summary">{{ formatCommandSummary(message) }}</p>
+                    <button
+                      v-if="hasCommandOutput(message)"
+                      type="button"
+                      class="command-step-toggle"
+                      @click="toggleCommandOutput(message.id)"
+                    >
+                      {{ isCommandOutputExpanded(message.id) ? 'Hide output' : 'Show output' }}
+                    </button>
+                  </div>
+                  <p class="command-step-command">{{ message.exec.command }}</p>
+                  <p v-if="message.exec.cwd" class="command-step-cwd">{{ message.exec.cwd }}</p>
+                  <pre
+                    v-if="hasCommandOutput(message) && isCommandOutputExpanded(message.id)"
+                    class="command-step-output"
+                  ><code>{{ message.exec.output }}</code></pre>
                 </div>
                 <p v-else class="message-text">
                   <template v-for="(segment, index) in parseInlineSegments(message.text)" :key="`seg-${index}`">
@@ -130,6 +157,18 @@
           <div class="message-stack">
             <article class="live-overlay-inline" aria-live="polite">
               <p class="live-overlay-label">{{ liveOverlay.activityLabel }}</p>
+              <ul
+                v-if="liveOverlay.activityDetails.length > 0"
+                class="live-overlay-details"
+              >
+                <li
+                  v-for="(detail, index) in liveOverlay.activityDetails"
+                  :key="`live-detail-${index}`"
+                  class="live-overlay-detail"
+                >
+                  {{ detail }}
+                </li>
+              </ul>
               <p
                 v-if="liveOverlay.reasoningText"
                 class="live-overlay-reasoning"
@@ -179,6 +218,7 @@ const bottomAnchorRef = ref<HTMLElement | null>(null)
 const modalImageUrl = ref('')
 const toolQuestionAnswers = ref<Record<string, string>>({})
 const toolQuestionOtherAnswers = ref<Record<string, string>>({})
+const expandedCommandOutputById = ref<Record<string, boolean>>({})
 const BOTTOM_THRESHOLD_PX = 16
 type InlineSegment =
   | { kind: 'text'; value: string }
@@ -459,6 +499,49 @@ function onRejectUnknownRequest(requestId: number): void {
   })
 }
 
+function formatDuration(durationMs?: number): string {
+  if (!Number.isFinite(durationMs) || (durationMs ?? 0) <= 0) return ''
+  const seconds = Math.max(1, Math.round((durationMs ?? 0) / 1000))
+  return `${String(seconds)}s`
+}
+
+function isCommandExecutionMessage(message: UiMessage): boolean {
+  return message.messageType === 'commandExecution' || message.messageType === 'commandExecution.live'
+}
+
+function formatCommandSummary(message: UiMessage): string {
+  const exec = message.exec
+  if (!exec) return 'Command'
+
+  const duration = formatDuration(exec.durationMs)
+  if (exec.status === 'inProgress') {
+    return 'Running command'
+  }
+  if (exec.status === 'completed') {
+    return duration ? `Ran command in ${duration}` : 'Ran command'
+  }
+  if (exec.status === 'failed') {
+    const exit = typeof exec.exitCode === 'number' ? ` (exit ${String(exec.exitCode)})` : ''
+    return duration ? `Command failed${exit} in ${duration}` : `Command failed${exit}`
+  }
+  return 'Command declined'
+}
+
+function hasCommandOutput(message: UiMessage): boolean {
+  return (message.exec?.output?.trim().length ?? 0) > 0
+}
+
+function isCommandOutputExpanded(messageId: string): boolean {
+  return expandedCommandOutputById.value[messageId] === true
+}
+
+function toggleCommandOutput(messageId: string): void {
+  expandedCommandOutputById.value = {
+    ...expandedCommandOutputById.value,
+    [messageId]: !isCommandOutputExpanded(messageId),
+  }
+}
+
 function scrollToBottom(): void {
   const container = conversationListRef.value
   const anchor = bottomAnchorRef.value
@@ -577,6 +660,14 @@ async function scheduleScrollRestore(): Promise<void> {
 watch(
   () => props.messages,
   async () => {
+    const nextExpanded: Record<string, boolean> = {}
+    for (const message of props.messages) {
+      if (!isCommandExecutionMessage(message) || !message.exec) continue
+      const currentExpanded = expandedCommandOutputById.value[message.id] === true
+      nextExpanded[message.id] = message.exec.status === 'inProgress' ? true : currentExpanded
+    }
+    expandedCommandOutputById.value = nextExpanded
+
     if (props.isLoading) return
     await scheduleScrollRestore()
   },
@@ -745,6 +836,14 @@ onBeforeUnmount(() => {
   @apply m-0 text-sm leading-5 font-medium text-zinc-600;
 }
 
+.live-overlay-details {
+  @apply m-0 p-0 list-none flex flex-col gap-1;
+}
+
+.live-overlay-detail {
+  @apply m-0 text-xs leading-5 text-zinc-500 font-mono whitespace-pre-wrap break-all;
+}
+
 .live-overlay-reasoning {
   @apply m-0 text-sm leading-5 text-zinc-500 whitespace-pre-wrap;
 }
@@ -789,6 +888,34 @@ onBeforeUnmount(() => {
 
 .message-text {
   @apply m-0 text-sm leading-relaxed whitespace-pre-wrap text-slate-800;
+}
+
+.command-step {
+  @apply max-w-[min(76ch,100%)] rounded-md border border-slate-200 bg-slate-50 px-3 py-2 flex flex-col gap-1;
+}
+
+.command-step-header {
+  @apply flex items-center justify-between gap-2;
+}
+
+.command-step-summary {
+  @apply m-0 text-xs leading-5 text-slate-600;
+}
+
+.command-step-toggle {
+  @apply border-none bg-transparent p-0 text-xs leading-5 text-[#0969da] hover:underline cursor-pointer;
+}
+
+.command-step-command {
+  @apply m-0 text-sm leading-5 text-slate-900 font-mono whitespace-pre-wrap break-all;
+}
+
+.command-step-cwd {
+  @apply m-0 text-xs leading-5 text-slate-500 font-mono whitespace-pre-wrap break-all;
+}
+
+.command-step-output {
+  @apply m-0 mt-1 rounded bg-slate-900 text-slate-100 p-2 text-xs leading-5 overflow-auto whitespace-pre-wrap;
 }
 
 .message-inline-code {

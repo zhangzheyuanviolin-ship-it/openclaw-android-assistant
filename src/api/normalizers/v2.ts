@@ -116,6 +116,25 @@ function toUiMessages(item: ThreadItem): UiMessage[] {
     return []
   }
 
+  if (item.type === 'commandExecution') {
+    return [
+      {
+        id: item.id,
+        role: 'system',
+        text: '',
+        messageType: item.type,
+        exec: {
+          command: item.command,
+          cwd: item.cwd,
+          status: item.status,
+          output: item.aggregatedOutput ?? '',
+          ...(typeof item.exitCode === 'number' ? { exitCode: item.exitCode } : {}),
+          ...(typeof item.durationMs === 'number' ? { durationMs: item.durationMs } : {}),
+        },
+      },
+    ]
+  }
+
   return []
 }
 

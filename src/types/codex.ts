@@ -78,6 +78,14 @@ export type UiMessage = {
   messageType?: string
   rawPayload?: string
   isUnhandled?: boolean
+  exec?: {
+    command: string
+    cwd: string
+    status: 'inProgress' | 'completed' | 'failed' | 'declined'
+    output: string
+    exitCode?: number
+    durationMs?: number
+  }
 }
 
 export type UiServerRequest = {
