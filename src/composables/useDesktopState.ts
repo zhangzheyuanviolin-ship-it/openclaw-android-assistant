@@ -635,7 +635,11 @@ export function useDesktopState() {
 
     const persisted = persistedMessagesByThreadId.value[threadId] ?? []
     const liveAgent = liveAgentMessagesByThreadId.value[threadId] ?? []
-    const combined = persisted === liveAgent ? persisted : [...persisted, ...liveAgent]
+    const persistedFiltered = persisted.filter((message) => {
+      if (message.messageType !== 'commandExecution' || !message.exec) return true
+      return message.exec.status === 'inProgress'
+    })
+    const combined = persistedFiltered === liveAgent ? persistedFiltered : [...persistedFiltered, ...liveAgent]
 
     const summary = turnSummaryByThreadId.value[threadId]
     if (!summary) return combined

@@ -119,20 +119,14 @@
                   v-else-if="isCommandExecutionMessage(message) && message.exec"
                   class="command-step"
                   :data-status="message.exec.status"
+                  :data-expanded="isCommandOutputExpanded(message.id)"
+                  role="button"
+                  tabindex="0"
+                  @click="toggleCommandOutput(message.id)"
+                  @keydown.enter.prevent="toggleCommandOutput(message.id)"
+                  @keydown.space.prevent="toggleCommandOutput(message.id)"
                 >
-                  <div class="command-step-header">
-                    <p class="command-step-summary">{{ formatCommandSummary(message) }}</p>
-                    <button
-                      v-if="hasCommandOutput(message)"
-                      type="button"
-                      class="command-step-toggle"
-                      @click="toggleCommandOutput(message.id)"
-                    >
-                      {{ isCommandOutputExpanded(message.id) ? 'Hide output' : 'Show output' }}
-                    </button>
-                  </div>
-                  <p class="command-step-command">{{ message.exec.command }}</p>
-                  <p v-if="message.exec.cwd" class="command-step-cwd">{{ message.exec.cwd }}</p>
+                  <p class="command-step-summary">{{ formatCommandSummary(message) }}</p>
                   <pre
                     v-if="hasCommandOutput(message) && isCommandOutputExpanded(message.id)"
                     class="command-step-output"
@@ -513,18 +507,18 @@ function formatCommandSummary(message: UiMessage): string {
   const exec = message.exec
   if (!exec) return 'Command'
 
-  const duration = formatDuration(exec.durationMs)
   if (exec.status === 'inProgress') {
-    return 'Running command'
+    return `Running ${exec.command}`
   }
+  const duration = formatDuration(exec.durationMs)
   if (exec.status === 'completed') {
-    return duration ? `Ran command in ${duration}` : 'Ran command'
+    return duration ? `Ran ${exec.command} (${duration})` : `Ran ${exec.command}`
   }
   if (exec.status === 'failed') {
     const exit = typeof exec.exitCode === 'number' ? ` (exit ${String(exec.exitCode)})` : ''
-    return duration ? `Command failed${exit} in ${duration}` : `Command failed${exit}`
+    return duration ? `Failed ${exec.command}${exit} (${duration})` : `Failed ${exec.command}${exit}`
   }
-  return 'Command declined'
+  return `Declined ${exec.command}`
 }
 
 function hasCommandOutput(message: UiMessage): boolean {
@@ -891,27 +885,15 @@ onBeforeUnmount(() => {
 }
 
 .command-step {
-  @apply max-w-[min(76ch,100%)] rounded-md border border-slate-200 bg-slate-50 px-3 py-2 flex flex-col gap-1;
+  @apply max-w-[min(76ch,100%)] rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 flex flex-col gap-1 cursor-pointer;
 }
 
-.command-step-header {
-  @apply flex items-center justify-between gap-2;
+.command-step:focus-visible {
+  @apply outline-none ring-2 ring-slate-300;
 }
 
 .command-step-summary {
-  @apply m-0 text-xs leading-5 text-slate-600;
-}
-
-.command-step-toggle {
-  @apply border-none bg-transparent p-0 text-xs leading-5 text-[#0969da] hover:underline cursor-pointer;
-}
-
-.command-step-command {
-  @apply m-0 text-sm leading-5 text-slate-900 font-mono whitespace-pre-wrap break-all;
-}
-
-.command-step-cwd {
-  @apply m-0 text-xs leading-5 text-slate-500 font-mono whitespace-pre-wrap break-all;
+  @apply m-0 text-xs leading-5 text-slate-700 font-mono truncate;
 }
 
 .command-step-output {
