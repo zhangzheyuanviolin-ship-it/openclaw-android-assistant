@@ -1435,6 +1435,27 @@ WEOF
         Log.i(TAG, "Created default workspace at $workspaceDir")
     }
 
+    fun ensureStorageBridge() {
+        val script = """
+            mkdir -p "${'$'}HOME/storage" 2>/dev/null || true
+            ln -sfn /sdcard "${'$'}HOME/sdcard" 2>/dev/null || true
+            ln -sfn /storage/emulated/0 "${'$'}HOME/storage/shared" 2>/dev/null || true
+            ln -sfn /sdcard/Download "${'$'}HOME/storage/downloads" 2>/dev/null || true
+
+            mkdir -p /sdcard/Download/AnyClaw 2>/dev/null || true
+            mkdir -p /sdcard/Download/下载管理/AnyClaw 2>/dev/null || true
+            mkdir -p /sdcard/下载管理/AnyClaw 2>/dev/null || true
+            ln -sfn /sdcard/Download/AnyClaw "${'$'}HOME/storage/anyclaw" 2>/dev/null || true
+        """.trimIndent()
+
+        val code = runInPrefix(script)
+        if (code == 0) {
+            Log.i(TAG, "Shared-storage bridge initialized")
+        } else {
+            Log.w(TAG, "Shared-storage bridge init returned code $code")
+        }
+    }
+
     fun ensureFullAccessConfig() {
         val paths = BootstrapInstaller.getPaths(context)
         val configDir = File(paths.homeDir, ".codex")
@@ -1477,6 +1498,9 @@ WEOF
             "TERM" to "xterm-256color",
             "ANDROID_DATA" to "/data",
             "ANDROID_ROOT" to "/system",
+            "ANDROID_STORAGE" to "/sdcard",
+            "EXTERNAL_STORAGE" to "/sdcard",
+            "ANYCLAW_EXPORT_DIR" to "/sdcard/Download/AnyClaw",
             "APT_CONFIG" to "${paths.prefixDir}/etc/apt/apt.conf",
             "DPKG_ADMINDIR" to "${paths.prefixDir}/var/lib/dpkg",
             "SSL_CERT_FILE" to "${paths.prefixDir}/etc/tls/cert.pem",

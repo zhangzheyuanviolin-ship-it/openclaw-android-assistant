@@ -1,9 +1,12 @@
 package com.codex.mobile
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
@@ -15,8 +18,10 @@ import android.webkit.WebViewClient
 import android.widget.EditText
 import android.widget.ProgressBar
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 
 class MainActivity : AppCompatActivity() {
 
@@ -30,6 +35,29 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusDetail: TextView
     private lateinit var progressBar: ProgressBar
     private lateinit var serverManager: CodexServerManager
+    private var setupStarted = false
+    private var waitingForStorageGrant = false
+
+    private val storagePermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+            waitingForStorageGrant = false
+            val granted = result.values.all { it }
+            if (granted || hasStorageAccess()) {
+                startSetupFlow()
+            } else {
+                showStoragePermissionDialog()
+            }
+        }
+
+    private val allFilesAccessLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            waitingForStorageGrant = false
+            if (hasStorageAccess()) {
+                startSetupFlow()
+            } else {
+                showStoragePermissionDialog()
+            }
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -46,7 +74,15 @@ class MainActivity : AppCompatActivity() {
         requestBatteryOptimizationExemption()
         startForegroundService()
         setupWebView()
-        startSetupFlow()
+        ensureStorageAccessOrStartSetup()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (!setupStarted && waitingForStorageGrant && hasStorageAccess()) {
+            waitingForStorageGrant = false
+            startSetupFlow()
+        }
     }
 
     override fun onDestroy() {
@@ -116,6 +152,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startSetupFlow() {
+        if (setupStarted) return
+        setupStarted = true
         showLoading(true)
         setStatus("Initializing…")
 
@@ -211,9 +249,10 @@ class MainActivity : AppCompatActivity() {
         }
         updateStatus("Codex ready")
 
-        // Step 3c: Write full-access config and create default workspace
+        // Step 3c: Write full-access config, create default workspace, and bridge shared storage paths
         serverManager.ensureFullAccessConfig()
         serverManager.ensureDefaultWorkspace()
+        serverManager.ensureStorageBridge()
 
         // Step 4: Start CONNECT proxy (needed for native binary DNS/TLS)
         updateStatus("Starting network proxy…")
@@ -335,12 +374,81 @@ class MainActivity : AppCompatActivity() {
             .setTitle(R.string.error_title)
             .setMessage(message)
             .setPositiveButton(R.string.retry) { _, _ ->
-                startSetupFlow()
+                setupStarted = false
+                ensureStorageAccessOrStartSetup()
             }
             .setNegativeButton(R.string.cancel) { _, _ ->
                 finish()
             }
             .setCancelable(false)
+            .show()
+    }
+
+    private fun ensureStorageAccessOrStartSetup() {
+        if (hasStorageAccess()) {
+            startSetupFlow()
+        } else {
+            showStoragePermissionDialog()
+        }
+    }
+
+    private fun hasStorageAccess(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
+        } else {
+            val readGranted = ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.READ_EXTERNAL_STORAGE,
+            ) == PackageManager.PERMISSION_GRANTED
+            val writeGranted = ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE,
+            ) == PackageManager.PERMISSION_GRANTED
+            readGranted && writeGranted
+        }
+    }
+
+    private fun requestStorageAccess() {
+        waitingForStorageGrant = true
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                data = Uri.parse("package:$packageName")
+            }
+            try {
+                allFilesAccessLauncher.launch(intent)
+            } catch (e: Exception) {
+                Log.w(TAG, "Falling back to generic all-files settings: ${e.message}")
+                val fallbackIntent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                allFilesAccessLauncher.launch(fallbackIntent)
+            }
+        } else {
+            storagePermissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.READ_EXTERNAL_STORAGE,
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                ),
+            )
+        }
+    }
+
+    private fun showStoragePermissionDialog() {
+        val message =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                "AnyClaw needs full file access to read and write your shared storage (for example /sdcard). Grant \"All files access\" to continue."
+            } else {
+                "AnyClaw needs storage permission to read and write your shared storage (for example /sdcard). Grant permission to continue."
+            }
+
+        AlertDialog.Builder(this)
+            .setTitle("Storage Permission Required")
+            .setMessage(message)
+            .setCancelable(false)
+            .setPositiveButton("Grant") { _, _ ->
+                requestStorageAccess()
+            }
+            .setNegativeButton("Exit") { _, _ ->
+                finish()
+            }
             .show()
     }
 
