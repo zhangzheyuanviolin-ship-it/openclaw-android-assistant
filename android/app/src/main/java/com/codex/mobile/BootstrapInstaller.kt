@@ -209,7 +209,7 @@ object BootstrapInstaller {
             sourcesList.writeText(
                 content
                     .replace("https://", "http://")
-                    .replace("com.termux", "com.codex.mobile")
+                    .replace("com.termux", context.packageName)
             )
         }
 
