@@ -10,6 +10,20 @@
         android:layout_height="match_parent"
         android:visibility="gone" />
 
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnPermissionCenter"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="16dp"
+        android:layout_marginEnd="16dp"
+        android:contentDescription="@string/permission_center_button_desc"
+        android:importantForAccessibility="yes"
+        android:minHeight="48dp"
+        android:text="@string/permission_center_button_text"
+        android:textAllCaps="false"
+        android:visibility="gone" />
+
     <LinearLayout
         android:id="@+id/loadingOverlay"
         android:layout_width="match_parent"

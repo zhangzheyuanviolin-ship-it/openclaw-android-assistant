@@ -1456,6 +1456,149 @@ WEOF
         }
     }
 
+    fun ensureShizukuBridgeScripts() {
+        val paths = BootstrapInstaller.getPaths(context)
+        val prefix = paths.prefixDir
+        val port = ShizukuShellBridgeServer.BRIDGE_PORT
+        val cmd = """
+            cat > "$prefix/bin/shizuku-shell" <<'EOF'
+#!/system/bin/sh
+if [ "${'$'}#" -eq 0 ]; then
+  echo "Usage: shizuku-shell <command>"
+  exit 2
+fi
+node - "${'$'}@" <<'NODE'
+const http = require('http');
+const cmd = process.argv.slice(2).join(' ');
+const payload = JSON.stringify({ command: cmd });
+const req = http.request({
+  host: '127.0.0.1',
+  port: $port,
+  path: '/exec',
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Content-Length': Buffer.byteLength(payload)
+  }
+}, (res) => {
+  let raw = '';
+  res.setEncoding('utf8');
+  res.on('data', (chunk) => { raw += chunk; });
+  res.on('end', () => {
+    let data = {};
+    try { data = JSON.parse(raw || '{}'); } catch (_) {}
+    const out = typeof data.stdout === 'string' ? data.stdout : '';
+    const err = typeof data.stderr === 'string' ? data.stderr : '';
+    if (out.length > 0) process.stdout.write(out);
+    if (err.length > 0) process.stderr.write(err);
+    const code = Number.isInteger(data.exitCode) ? data.exitCode : (data.ok ? 0 : 1);
+    if (!data.ok && data.error) {
+      process.stderr.write(String(data.error) + '\n');
+    }
+    process.exit(code);
+  });
+});
+req.on('error', (e) => {
+  process.stderr.write('Shizuku bridge unreachable: ' + e.message + '\n');
+  process.exit(3);
+});
+req.write(payload);
+req.end();
+NODE
+EOF
+
+            cat > "$prefix/bin/shizuku-shell-status" <<'EOF'
+#!/system/bin/sh
+node - <<'NODE'
+const http = require('http');
+http.get({ host: '127.0.0.1', port: $port, path: '/status' }, (res) => {
+  let raw = '';
+  res.setEncoding('utf8');
+  res.on('data', (c) => { raw += c; });
+  res.on('end', () => {
+    try {
+      const j = JSON.parse(raw || '{}');
+      console.log(JSON.stringify(j, null, 2));
+      process.exit(j.ok ? 0 : 1);
+    } catch (e) {
+      console.error('Invalid response:', e.message);
+      process.exit(1);
+    }
+  });
+}).on('error', (e) => {
+  console.error('Shizuku bridge unreachable:', e.message);
+  process.exit(3);
+});
+NODE
+EOF
+
+            cat > "$prefix/bin/shizuku-shell-enable" <<'EOF'
+#!/system/bin/sh
+node - <<'NODE'
+const http = require('http');
+const req = http.request({
+  host: '127.0.0.1',
+  port: $port,
+  path: '/enable',
+  method: 'POST',
+  headers: { 'Content-Length': 0 }
+}, (res) => {
+  let raw = '';
+  res.setEncoding('utf8');
+  res.on('data', (c) => { raw += c; });
+  res.on('end', () => {
+    console.log(raw || '{"ok":true}');
+    process.exit(0);
+  });
+});
+req.on('error', (e) => {
+  console.error('Shizuku bridge unreachable:', e.message);
+  process.exit(3);
+});
+req.end();
+NODE
+EOF
+
+            cat > "$prefix/bin/shizuku-shell-disable" <<'EOF'
+#!/system/bin/sh
+node - <<'NODE'
+const http = require('http');
+const req = http.request({
+  host: '127.0.0.1',
+  port: $port,
+  path: '/disable',
+  method: 'POST',
+  headers: { 'Content-Length': 0 }
+}, (res) => {
+  let raw = '';
+  res.setEncoding('utf8');
+  res.on('data', (c) => { raw += c; });
+  res.on('end', () => {
+    console.log(raw || '{"ok":true}');
+    process.exit(0);
+  });
+});
+req.on('error', (e) => {
+  console.error('Shizuku bridge unreachable:', e.message);
+  process.exit(3);
+});
+req.end();
+NODE
+EOF
+
+            chmod 700 "$prefix/bin/shizuku-shell" \
+                      "$prefix/bin/shizuku-shell-status" \
+                      "$prefix/bin/shizuku-shell-enable" \
+                      "$prefix/bin/shizuku-shell-disable"
+        """.trimIndent()
+        val code = runInPrefix(cmd)
+        if (code == 0) {
+            Log.i(TAG, "Shizuku shell bridge scripts installed")
+        } else {
+            Log.w(TAG, "Shizuku shell bridge script install returned $code")
+        }
+    }
+
     fun ensureFullAccessConfig() {
         val paths = BootstrapInstaller.getPaths(context)
         val configDir = File(paths.homeDir, ".codex")

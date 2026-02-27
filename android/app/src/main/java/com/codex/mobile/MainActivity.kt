@@ -15,13 +15,16 @@ import android.webkit.ConsoleMessage
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.Button
 import android.widget.EditText
 import android.widget.ProgressBar
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import fi.iki.elonen.NanoHTTPD
 
 class MainActivity : AppCompatActivity() {
 
@@ -34,16 +37,20 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusText: TextView
     private lateinit var statusDetail: TextView
     private lateinit var progressBar: ProgressBar
+    private lateinit var permissionCenterButton: Button
     private lateinit var serverManager: CodexServerManager
+    private var shizukuBridgeServer: ShizukuShellBridgeServer? = null
     private var setupStarted = false
     private var waitingForStorageGrant = false
+    private var waitingForShizukuGrant = false
+    private var shizukuPermissionRequested = false
 
     private val storagePermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
             waitingForStorageGrant = false
             val granted = result.values.all { it }
             if (granted || hasStorageAccess()) {
-                startSetupFlow()
+                maybeRequestShizukuThenStartSetup()
             } else {
                 showStoragePermissionDialog()
             }
@@ -53,7 +60,7 @@ class MainActivity : AppCompatActivity() {
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
             waitingForStorageGrant = false
             if (hasStorageAccess()) {
-                startSetupFlow()
+                maybeRequestShizukuThenStartSetup()
             } else {
                 showStoragePermissionDialog()
             }
@@ -68,11 +75,17 @@ class MainActivity : AppCompatActivity() {
         statusText = findViewById(R.id.statusText)
         statusDetail = findViewById(R.id.statusDetail)
         progressBar = findViewById(R.id.progressBar)
+        permissionCenterButton = findViewById(R.id.btnPermissionCenter)
 
         serverManager = CodexServerManager(this)
 
+        permissionCenterButton.setOnClickListener {
+            startActivity(Intent(this, PermissionManagerActivity::class.java))
+        }
+
         requestBatteryOptimizationExemption()
         startForegroundService()
+        startShizukuBridgeServer()
         setupWebView()
         ensureStorageAccessOrStartSetup()
     }
@@ -81,12 +94,18 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         if (!setupStarted && waitingForStorageGrant && hasStorageAccess()) {
             waitingForStorageGrant = false
+            maybeRequestShizukuThenStartSetup()
+        }
+        if (!setupStarted && waitingForShizukuGrant && ShizukuController.hasPermission()) {
+            waitingForShizukuGrant = false
             startSetupFlow()
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        shizukuBridgeServer?.stop()
+        shizukuBridgeServer = null
         serverManager.stopServer()
         stopService(Intent(this, CodexForegroundService::class.java))
     }
@@ -253,6 +272,7 @@ class MainActivity : AppCompatActivity() {
         serverManager.ensureFullAccessConfig()
         serverManager.ensureDefaultWorkspace()
         serverManager.ensureStorageBridge()
+        serverManager.ensureShizukuBridgeScripts()
 
         // Step 4: Start CONNECT proxy (needed for native binary DNS/TLS)
         updateStatus("Starting network proxy…")
@@ -324,6 +344,7 @@ class MainActivity : AppCompatActivity() {
         runOnUiThread {
             showLoading(false)
             webView.visibility = View.VISIBLE
+            permissionCenterButton.visibility = View.VISIBLE
             webView.loadUrl("http://127.0.0.1:${CodexServerManager.SERVER_PORT}/")
         }
     }
@@ -386,9 +407,53 @@ class MainActivity : AppCompatActivity() {
 
     private fun ensureStorageAccessOrStartSetup() {
         if (hasStorageAccess()) {
-            startSetupFlow()
+            maybeRequestShizukuThenStartSetup()
         } else {
             showStoragePermissionDialog()
+        }
+    }
+
+    private fun maybeRequestShizukuThenStartSetup() {
+        if (setupStarted) return
+
+        val installed = ShizukuController.isShizukuAppInstalled(this)
+        if (!installed) {
+            Toast.makeText(this, getString(R.string.shizuku_not_installed), Toast.LENGTH_LONG).show()
+            startSetupFlow()
+            return
+        }
+
+        val running = ShizukuController.isServiceRunning()
+        if (!running) {
+            Toast.makeText(this, getString(R.string.shizuku_service_not_running), Toast.LENGTH_LONG).show()
+            startSetupFlow()
+            return
+        }
+
+        if (ShizukuController.hasPermission()) {
+            startSetupFlow()
+            return
+        }
+
+        if (shizukuPermissionRequested) {
+            startSetupFlow()
+            return
+        }
+
+        shizukuPermissionRequested = true
+        waitingForShizukuGrant = true
+        Toast.makeText(this, getString(R.string.shizuku_permission_requesting), Toast.LENGTH_SHORT).show()
+        ShizukuController.requestPermission { granted ->
+            runOnUiThread {
+                waitingForShizukuGrant = false
+                val msg = if (granted) {
+                    getString(R.string.shizuku_permission_granted)
+                } else {
+                    getString(R.string.shizuku_permission_denied)
+                }
+                Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+                startSetupFlow()
+            }
         }
     }
 
@@ -454,6 +519,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun showLoading(show: Boolean) {
         loadingOverlay.visibility = if (show) View.VISIBLE else View.GONE
+        if (show) {
+            permissionCenterButton.visibility = View.GONE
+        }
     }
 
     private fun setStatus(text: String, detail: String? = null) {
@@ -474,6 +542,17 @@ class MainActivity : AppCompatActivity() {
         runOnUiThread {
             statusDetail.text = text
             statusDetail.visibility = View.VISIBLE
+        }
+    }
+
+    private fun startShizukuBridgeServer() {
+        try {
+            val server = ShizukuShellBridgeServer(this)
+            server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
+            shizukuBridgeServer = server
+            Log.i(TAG, "Shizuku bridge server started on ${ShizukuShellBridgeServer.BRIDGE_PORT}")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to start Shizuku bridge server: ${e.message}")
         }
     }
 }

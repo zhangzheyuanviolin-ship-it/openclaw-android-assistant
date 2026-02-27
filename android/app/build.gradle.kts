@@ -14,8 +14,8 @@ android {
         // Android 10+ (targetSdk 29+) enforces W^X which blocks this via SELinux.
         // Termux (F-Droid) uses the same approach.
         targetSdk = 28
-        versionCode = 31
-        versionName = "0.2.1-beta-storage-bridge1"
+        versionCode = 32
+        versionName = "0.2.2-beta-shizuku1"
     }
 
     buildTypes {
@@ -55,4 +55,7 @@ dependencies {
     implementation("androidx.webkit:webkit:1.12.1")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("com.google.android.material:material:1.12.0")
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
+    implementation("org.nanohttpd:nanohttpd:2.3.1")
 }
