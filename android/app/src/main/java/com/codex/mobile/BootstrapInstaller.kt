@@ -161,7 +161,7 @@ object BootstrapInstaller {
 
         // Fix hardcoded Termux paths in apt config and package metadata
         onProgress("Configuring package manager…")
-        fixTermuxPaths(paths)
+        fixTermuxPaths(paths, context.packageName)
 
         Log.i(TAG, "Bootstrap installed successfully at ${paths.prefixDir}")
     }
@@ -171,7 +171,10 @@ object BootstrapInstaller {
      * /data/data/com.termux/files/usr. Rewrite apt configuration
      * and dpkg metadata so they reference our actual prefix.
      */
-    private fun fixTermuxPaths(paths: Paths) {
+    private fun fixTermuxPaths(
+        paths: Paths,
+        packageName: String,
+    ) {
         val prefix = paths.prefixDir
         val termuxPrefix = "/data/data/com.termux/files/usr"
 
@@ -209,7 +212,7 @@ object BootstrapInstaller {
             sourcesList.writeText(
                 content
                     .replace("https://", "http://")
-                    .replace("com.termux", context.packageName)
+                    .replace("com.termux", packageName)
             )
         }
 
