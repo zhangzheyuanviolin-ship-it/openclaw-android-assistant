@@ -46,8 +46,34 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Prepare fixed signing keystore
+        run: |
+          if [ -z "${{ secrets.ANYCLAW_SIGNING_STORE_BASE64 }}" ]; then
+            echo "Missing repository secret ANYCLAW_SIGNING_STORE_BASE64"
+            exit 1
+          fi
+          if [ -z "${{ secrets.ANYCLAW_SIGNING_STORE_PASSWORD }}" ]; then
+            echo "Missing repository secret ANYCLAW_SIGNING_STORE_PASSWORD"
+            exit 1
+          fi
+          if [ -z "${{ secrets.ANYCLAW_SIGNING_KEY_ALIAS }}" ]; then
+            echo "Missing repository secret ANYCLAW_SIGNING_KEY_ALIAS"
+            exit 1
+          fi
+          if [ -z "${{ secrets.ANYCLAW_SIGNING_KEY_PASSWORD }}" ]; then
+            echo "Missing repository secret ANYCLAW_SIGNING_KEY_PASSWORD"
+            exit 1
+          fi
+          mkdir -p android/signing
+          echo "${{ secrets.ANYCLAW_SIGNING_STORE_BASE64 }}" | base64 -d > android/signing/anyclaw-release.p12
+
       - name: Build debug APK
         working-directory: android
+        env:
+          ANYCLAW_SIGNING_STORE_FILE: ${{ github.workspace }}/android/signing/anyclaw-release.p12
+          ANYCLAW_SIGNING_STORE_PASSWORD: ${{ secrets.ANYCLAW_SIGNING_STORE_PASSWORD }}
+          ANYCLAW_SIGNING_KEY_ALIAS: ${{ secrets.ANYCLAW_SIGNING_KEY_ALIAS }}
+          ANYCLAW_SIGNING_KEY_PASSWORD: ${{ secrets.ANYCLAW_SIGNING_KEY_PASSWORD }}
         run: ./gradlew assembleDebug
 
       - name: Rename APK

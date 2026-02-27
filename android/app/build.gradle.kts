@@ -1,7 +1,38 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
+
+val localProperties = Properties()
+val localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    FileInputStream(localPropertiesFile).use { input ->
+        localProperties.load(input)
+    }
+}
+
+fun getSigningValue(name: String): String? {
+    val envValue = System.getenv(name)?.trim()
+    if (!envValue.isNullOrEmpty()) return envValue
+    val propValue = localProperties.getProperty(name)?.trim()
+    if (!propValue.isNullOrEmpty()) return propValue
+    return null
+}
+
+val signingStoreFilePath = getSigningValue("ANYCLAW_SIGNING_STORE_FILE")
+val signingStorePassword = getSigningValue("ANYCLAW_SIGNING_STORE_PASSWORD")
+val signingKeyAlias = getSigningValue("ANYCLAW_SIGNING_KEY_ALIAS")
+val signingKeyPassword = getSigningValue("ANYCLAW_SIGNING_KEY_PASSWORD")
+
+val hasFixedSigning =
+    !signingStoreFilePath.isNullOrEmpty() &&
+    !signingStorePassword.isNullOrEmpty() &&
+    !signingKeyAlias.isNullOrEmpty() &&
+    !signingKeyPassword.isNullOrEmpty() &&
+    file(signingStoreFilePath).exists()
 
 android {
     namespace = "com.codex.mobile"
@@ -14,8 +45,24 @@ android {
         // Android 10+ (targetSdk 29+) enforces W^X which blocks this via SELinux.
         // Termux (F-Droid) uses the same approach.
         targetSdk = 28
-        versionCode = 32
-        versionName = "0.2.2-beta-shizuku1"
+        versionCode = 33
+        versionName = "0.2.3-beta-shizuku1-fixedsign1"
+    }
+
+    signingConfigs {
+        if (hasFixedSigning) {
+            create("fixed") {
+                storeFile = file(signingStoreFilePath!!)
+                storePassword = signingStorePassword
+                keyAlias = signingKeyAlias
+                keyPassword = signingKeyPassword
+                if (signingStoreFilePath.endsWith(".p12", ignoreCase = true) ||
+                    signingStoreFilePath.endsWith(".pfx", ignoreCase = true)
+                ) {
+                    storeType = "pkcs12"
+                }
+            }
+        }
     }
 
     buildTypes {
@@ -25,6 +72,14 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            if (hasFixedSigning) {
+                signingConfig = signingConfigs.getByName("fixed")
+            }
+        }
+        debug {
+            if (hasFixedSigning) {
+                signingConfig = signingConfigs.getByName("fixed")
+            }
         }
     }
 
@@ -47,6 +102,7 @@ android {
     androidResources {
         noCompress += listOf("zip", "tar.gz")
     }
+
 }
 
 dependencies {

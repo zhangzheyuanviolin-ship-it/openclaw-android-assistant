@@ -6,3 +6,10 @@ PROJECT_SPEC.md
 codex_tools_from_notices.txt
 package-lock.json
 /output/
+android/signing/*.p12
+android/signing/*.pfx
+android/signing/*.jks
+android/signing/*.keystore
+android/signing/*.pem
+android/signing/*.key
+android/signing/*.crt
