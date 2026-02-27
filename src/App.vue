@@ -108,7 +108,7 @@
                   :disabled="newThreadFolderOptions.length === 0" @update:model-value="onSelectNewThreadFolder" />
               </div>
 
-              <ThreadComposer :active-thread-id="composerThreadContextId" :disabled="isSendingMessage"
+              <ThreadComposer :active-thread-id="composerThreadContextId"
                 :models="availableModelIds" :selected-model="selectedModelId"
                 :selected-reasoning-effort="selectedReasoningEffort" :skills="installedSkills"
                 :is-turn-in-progress="false"
@@ -130,13 +130,21 @@
                   @rollback="onRollback" />
               </div>
 
-              <ThreadComposer :active-thread-id="composerThreadContextId"
-                :disabled="isSendingMessage || isLoadingMessages" :models="availableModelIds"
-                :selected-model="selectedModelId" :selected-reasoning-effort="selectedReasoningEffort"
-                :skills="installedSkills"
-                :is-turn-in-progress="isSelectedThreadInProgress" :is-interrupting-turn="isInterruptingTurn"
-                @submit="onSubmitThreadMessage" @update:selected-model="onSelectModel"
-                @update:selected-reasoning-effort="onSelectReasoningEffort" @interrupt="onInterruptTurn" />
+              <div class="composer-with-queue">
+                <QueuedMessages
+                  :messages="selectedThreadQueuedMessages"
+                  @steer="steerQueuedMessage"
+                  @delete="removeQueuedMessage"
+                />
+                <ThreadComposer :active-thread-id="composerThreadContextId"
+                  :models="availableModelIds"
+                  :selected-model="selectedModelId" :selected-reasoning-effort="selectedReasoningEffort"
+                  :skills="installedSkills"
+                  :is-turn-in-progress="isSelectedThreadInProgress" :is-interrupting-turn="isInterruptingTurn"
+                  :has-queue-above="selectedThreadQueuedMessages.length > 0"
+                  @submit="onSubmitThreadMessage" @update:selected-model="onSelectModel"
+                  @update:selected-reasoning-effort="onSelectReasoningEffort" @interrupt="onInterruptTurn" />
+              </div>
             </div>
           </template>
         </section>
@@ -153,6 +161,7 @@ import SidebarThreadTree from './components/sidebar/SidebarThreadTree.vue'
 import ContentHeader from './components/content/ContentHeader.vue'
 import ThreadConversation from './components/content/ThreadConversation.vue'
 import ThreadComposer from './components/content/ThreadComposer.vue'
+import QueuedMessages from './components/content/QueuedMessages.vue'
 import ComposerDropdown from './components/content/ComposerDropdown.vue'
 import SkillsHub from './components/content/SkillsHub.vue'
 import SidebarThreadControls from './components/sidebar/SidebarThreadControls.vue'
@@ -195,6 +204,9 @@ const {
   interruptSelectedThreadTurn,
   rollbackSelectedThread,
   isRollingBack,
+  selectedThreadQueuedMessages,
+  removeQueuedMessage,
+  steerQueuedMessage,
   setSelectedModelId,
   setSelectedReasoningEffort,
   respondToPendingServerRequest,
@@ -376,13 +388,13 @@ function onWindowKeyDown(event: KeyboardEvent): void {
   setSidebarCollapsed(!isSidebarCollapsed.value)
 }
 
-function onSubmitThreadMessage(payload: { text: string; imageUrls: string[]; skills: Array<{ name: string; path: string }> }): void {
+function onSubmitThreadMessage(payload: { text: string; imageUrls: string[]; skills: Array<{ name: string; path: string }>; mode: 'steer' | 'queue' }): void {
   const text = payload.text
   if (isHomeRoute.value) {
     void submitFirstMessageForNewThread(text, payload.imageUrls, payload.skills)
     return
   }
-  void sendMessageToSelectedThread(text, payload.imageUrls, payload.skills)
+  void sendMessageToSelectedThread(text, payload.imageUrls, payload.skills, payload.mode)
 }
 
 function onSelectNewThreadFolder(cwd: string): void {
@@ -604,6 +616,10 @@ async function submitFirstMessageForNewThread(
 
 .content-thread {
   @apply flex-1 min-h-0;
+}
+
+.composer-with-queue {
+  @apply w-full;
 }
 
 .new-thread-empty {
