@@ -38,6 +38,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusDetail: TextView
     private lateinit var progressBar: ProgressBar
     private lateinit var permissionCenterButton: Button
+    private lateinit var promptManagerButton: Button
     private lateinit var serverManager: CodexServerManager
     private var shizukuBridgeServer: ShizukuShellBridgeServer? = null
     private var setupStarted = false
@@ -76,11 +77,15 @@ class MainActivity : AppCompatActivity() {
         statusDetail = findViewById(R.id.statusDetail)
         progressBar = findViewById(R.id.progressBar)
         permissionCenterButton = findViewById(R.id.btnPermissionCenter)
+        promptManagerButton = findViewById(R.id.btnPromptManager)
 
         serverManager = CodexServerManager(this)
 
         permissionCenterButton.setOnClickListener {
             startActivity(Intent(this, PermissionManagerActivity::class.java))
+        }
+        promptManagerButton.setOnClickListener {
+            startActivity(Intent(this, PromptManagerActivity::class.java))
         }
 
         requestBatteryOptimizationExemption()
@@ -92,6 +97,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        PromptProfileStore.ensureSynced(this)
         if (!setupStarted && waitingForStorageGrant && hasStorageAccess()) {
             waitingForStorageGrant = false
             maybeRequestShizukuThenStartSetup()
@@ -273,6 +279,7 @@ class MainActivity : AppCompatActivity() {
         serverManager.ensureDefaultWorkspace()
         serverManager.ensureStorageBridge()
         serverManager.ensureShizukuBridgeScripts()
+        PromptProfileStore.ensureSynced(this)
 
         // Step 4: Start CONNECT proxy (needed for native binary DNS/TLS)
         updateStatus("Starting network proxy…")
@@ -345,6 +352,7 @@ class MainActivity : AppCompatActivity() {
             showLoading(false)
             webView.visibility = View.VISIBLE
             permissionCenterButton.visibility = View.VISIBLE
+            promptManagerButton.visibility = View.VISIBLE
             webView.loadUrl("http://127.0.0.1:${CodexServerManager.SERVER_PORT}/")
         }
     }
@@ -521,6 +529,7 @@ class MainActivity : AppCompatActivity() {
         loadingOverlay.visibility = if (show) View.VISIBLE else View.GONE
         if (show) {
             permissionCenterButton.visibility = View.GONE
+            promptManagerButton.visibility = View.GONE
         }
     }
 

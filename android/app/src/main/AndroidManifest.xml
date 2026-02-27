@@ -39,6 +39,12 @@
             android:label="@string/permission_center_title"
             android:windowSoftInputMode="adjustResize" />
 
+        <activity
+            android:name=".PromptManagerActivity"
+            android:exported="false"
+            android:label="@string/prompt_manager_title"
+            android:windowSoftInputMode="adjustResize" />
+
         <provider
             android:name="rikka.shizuku.ShizukuProvider"
             android:authorities="${applicationId}.shizuku"

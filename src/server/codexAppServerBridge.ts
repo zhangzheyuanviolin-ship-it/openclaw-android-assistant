@@ -6,6 +6,9 @@ import { join, dirname } from 'node:path'
 
 const prefixBin = process.env.PREFIX ? join(process.env.PREFIX, 'bin') : ''
 const shellPath = prefixBin ? join(prefixBin, 'sh') : '/bin/sh'
+const homeDir = process.env.HOME ?? ''
+const promptInjectionPath = homeDir ? join(homeDir, '.openclaw-android', 'state', 'prompt-injection.json') : ''
+const shizukuStatusPath = homeDir ? join(homeDir, '.openclaw-android', 'capabilities', 'shizuku.json') : ''
 
 type JsonRpcCall = {
   jsonrpc: '2.0'
@@ -89,6 +92,69 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   if (raw.length === 0) return null
 
   return JSON.parse(raw) as unknown
+}
+
+async function readJsonFile(path: string): Promise<Record<string, unknown> | null> {
+  if (!path) return null
+  try {
+    const raw = await readFile(path, 'utf8')
+    const parsed = JSON.parse(raw) as unknown
+    return asRecord(parsed)
+  } catch {
+    return null
+  }
+}
+
+function normalizeText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function buildCapabilitySummary(statusRecord: Record<string, unknown> | null): string {
+  if (!statusRecord) return ''
+  const installed = statusRecord.installed === true ? '1' : '0'
+  const running = statusRecord.running === true ? '1' : '0'
+  const granted = statusRecord.granted === true ? '1' : '0'
+  const enabled = statusRecord.enabled === true ? '1' : '0'
+  const executor = normalizeText(statusRecord.executor) || 'system-shell'
+  const errorCode = normalizeText(statusRecord.last_error_code) || 'none'
+  const checkedAt = normalizeText(statusRecord.checked_at) || new Date().toISOString()
+  return `Current capability snapshot: installed=${installed} running=${running} granted=${granted} enabled=${enabled} executor=${executor} last_error_code=${errorCode} checked_at=${checkedAt}`
+}
+
+function shouldInjectDeveloperInstructions(method: string): boolean {
+  return method === 'thread/start' || method === 'thread/resume'
+}
+
+function mergeDeveloperInstructions(existing: unknown, injected: string): string {
+  const existingText = normalizeText(existing)
+  const injectText = normalizeText(injected)
+  if (!injectText) return existingText
+  if (!existingText) return injectText
+  if (existingText.includes(injectText)) return existingText
+  return `${existingText}\n\n${injectText}`
+}
+
+async function buildInjectedDeveloperInstructions(): Promise<string> {
+  const promptRecord = await readJsonFile(promptInjectionPath)
+  const statusRecord = await readJsonFile(shizukuStatusPath)
+
+  const chunks: string[] = []
+  const promptInstructions = normalizeText(promptRecord?.developer_instructions)
+  if (promptInstructions) {
+    chunks.push(promptInstructions)
+  }
+
+  const selectedName = normalizeText(promptRecord?.active_profile_name)
+  if (selectedName) {
+    chunks.push(`Selected prompt profile: ${selectedName}`)
+  }
+
+  const capabilitySummary = buildCapabilitySummary(statusRecord)
+  if (capabilitySummary) {
+    chunks.push(capabilitySummary)
+  }
+
+  return chunks.join('\n\n').trim()
 }
 
 class AppServerProcess {
@@ -525,7 +591,20 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
           return
         }
 
-        const result = await appServer.rpc(body.method, body.params ?? null)
+        let nextParams: unknown = body.params ?? null
+        if (shouldInjectDeveloperInstructions(body.method)) {
+          const injected = await buildInjectedDeveloperInstructions()
+          if (injected.length > 0) {
+            const paramsRecord = asRecord(nextParams) ?? {}
+            paramsRecord.developerInstructions = mergeDeveloperInstructions(
+              paramsRecord.developerInstructions,
+              injected,
+            )
+            nextParams = paramsRecord
+          }
+        }
+
+        const result = await appServer.rpc(body.method, nextParams)
         setJson(res, 200, { result })
         return
       }

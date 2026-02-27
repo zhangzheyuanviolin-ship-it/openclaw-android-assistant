@@ -1489,11 +1489,15 @@ const req = http.request({
     try { data = JSON.parse(raw || '{}'); } catch (_) {}
     const out = typeof data.stdout === 'string' ? data.stdout : '';
     const err = typeof data.stderr === 'string' ? data.stderr : '';
+    const errorCode = typeof data.error_code === 'string' ? data.error_code : '';
     if (out.length > 0) process.stdout.write(out);
     if (err.length > 0) process.stderr.write(err);
     const code = Number.isInteger(data.exitCode) ? data.exitCode : (data.ok ? 0 : 1);
     if (!data.ok && data.error) {
       process.stderr.write(String(data.error) + '\n');
+    }
+    if (!data.ok && errorCode.length > 0) {
+      process.stderr.write('error_code=' + errorCode + '\n');
     }
     process.exit(code);
   });
@@ -1586,10 +1590,98 @@ req.end();
 NODE
 EOF
 
+            cat > "$prefix/bin/system-shell" <<'EOF'
+#!/system/bin/sh
+if [ "${'$'}#" -eq 0 ]; then
+  echo "Usage: system-shell <command>"
+  exit 2
+fi
+
+attempt=0
+while true; do
+  shizuku-shell "${'$'}@"
+  code="${'$'}?"
+  if [ "${'$'}code" -eq 0 ]; then
+    exit 0
+  fi
+  if [ "${'$'}code" -ne 3 ] || [ "${'$'}attempt" -ge 2 ]; then
+    exit "${'$'}code"
+  fi
+  attempt=$((attempt + 1))
+  sleep "${'$'}attempt"
+done
+EOF
+
+            cat > "$prefix/bin/codex-capabilities" <<'EOF'
+#!/system/bin/sh
+MODE="${'$'}1"
+node - "${'$'}MODE" <<'NODE'
+const http = require('http');
+const mode = process.argv[2] || '';
+
+function emitPlain(j) {
+  const to01 = (v) => (v ? '1' : '0');
+  const line = [
+    'installed=' + to01(!!j.installed),
+    'running=' + to01(!!j.running),
+    'granted=' + to01(!!j.granted),
+    'enabled=' + to01(!!j.enabled),
+    'executor=' + (typeof j.executor === 'string' ? j.executor : 'system-shell'),
+    'last_error_code=' + (typeof j.last_error_code === 'string' ? j.last_error_code : 'none'),
+    'checked_at=' + (typeof j.checked_at === 'string' ? j.checked_at : new Date().toISOString())
+  ].join(' ');
+  process.stdout.write(line + '\n');
+}
+
+function emitJson(j) {
+  process.stdout.write(JSON.stringify(j, null, 2) + '\n');
+}
+
+http.get({ host: '127.0.0.1', port: $port, path: '/status' }, (res) => {
+  let raw = '';
+  res.setEncoding('utf8');
+  res.on('data', (chunk) => { raw += chunk; });
+  res.on('end', () => {
+    let j = {};
+    try {
+      j = JSON.parse(raw || '{}');
+    } catch (_) {
+      j = {
+        ok: false,
+        error_code: 'invalid_response',
+        error: 'Invalid JSON from status endpoint',
+        checked_at: new Date().toISOString()
+      };
+    }
+    if (mode === '--plain') emitPlain(j);
+    else emitJson(j);
+    process.exit(j.ok === false ? 1 : 0);
+  });
+}).on('error', (e) => {
+  const j = {
+    ok: false,
+    installed: false,
+    running: false,
+    granted: false,
+    enabled: false,
+    executor: 'system-shell',
+    error_code: 'bridge_unreachable',
+    error: String(e.message || e),
+    checked_at: new Date().toISOString()
+  };
+  if (mode === '--plain') emitPlain(j);
+  else emitJson(j);
+  process.exit(3);
+});
+NODE
+EOF
+
             chmod 700 "$prefix/bin/shizuku-shell" \
                       "$prefix/bin/shizuku-shell-status" \
                       "$prefix/bin/shizuku-shell-enable" \
-                      "$prefix/bin/shizuku-shell-disable"
+                      "$prefix/bin/shizuku-shell-disable" \
+                      "$prefix/bin/system-shell" \
+                      "$prefix/bin/codex-capabilities"
         """.trimIndent()
         val code = runInPrefix(cmd)
         if (code == 0) {

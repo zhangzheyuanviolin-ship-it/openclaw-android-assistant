@@ -18,6 +18,7 @@ data class ShizukuExecResult(
     val stdout: String,
     val stderr: String,
     val exitCode: Int,
+    val errorCode: String? = null,
     val error: String? = null,
 )
 
@@ -124,6 +125,7 @@ object ShizukuController {
                 stdout = "",
                 stderr = "",
                 exitCode = -1,
+                errorCode = "service_stopped",
                 error = "Shizuku service not running",
             )
         }
@@ -133,6 +135,7 @@ object ShizukuController {
                 stdout = "",
                 stderr = "",
                 exitCode = -1,
+                errorCode = "permission_revoked",
                 error = "Shizuku permission not granted",
             )
         }
@@ -143,6 +146,7 @@ object ShizukuController {
                 stdout = "",
                 stderr = "",
                 exitCode = -1,
+                errorCode = "bridge_unreachable",
                 error = "Shizuku service interface unavailable",
             )
 
@@ -153,6 +157,7 @@ object ShizukuController {
                     stdout = "",
                     stderr = "",
                     exitCode = -1,
+                    errorCode = "executor_missing",
                     error = "Failed to start Shizuku process",
                 )
 
@@ -187,7 +192,7 @@ object ShizukuController {
             stderrThread.start()
 
             val exitCode = processClass.getMethod("waitFor").invoke(process) as Int
-            latch.await(15, TimeUnit.SECONDS)
+            val drained = latch.await(15, TimeUnit.SECONDS)
 
             try {
                 stdoutPfd?.close()
@@ -198,18 +203,30 @@ object ShizukuController {
             } catch (_: Exception) {
             }
 
-            ShizukuExecResult(
-                success = exitCode == 0,
-                stdout = stdoutHolder.toString(),
-                stderr = stderrHolder.toString(),
-                exitCode = exitCode,
-            )
+            if (!drained) {
+                ShizukuExecResult(
+                    success = false,
+                    stdout = stdoutHolder.toString(),
+                    stderr = stderrHolder.toString(),
+                    exitCode = -1,
+                    errorCode = "timeout",
+                    error = "Timed out while reading Shizuku process output",
+                )
+            } else {
+                ShizukuExecResult(
+                    success = exitCode == 0,
+                    stdout = stdoutHolder.toString(),
+                    stderr = stderrHolder.toString(),
+                    exitCode = exitCode,
+                )
+            }
         } catch (e: Exception) {
             ShizukuExecResult(
                 success = false,
                 stdout = "",
                 stderr = "",
                 exitCode = -1,
+                errorCode = "bridge_unreachable",
                 error = e.message ?: "Unknown error",
             )
         }
