@@ -263,12 +263,6 @@ function reorderStringArray(items: string[], fromIndex: number, toIndex: number)
   return next
 }
 
-function areCommandExecutionsEqual(first?: CommandExecutionData, second?: CommandExecutionData): boolean {
-  if (!first && !second) return true
-  if (!first || !second) return false
-  return first.status === second.status && first.aggregatedOutput === second.aggregatedOutput && first.exitCode === second.exitCode
-}
-
 function areMessageFieldsEqual(first: UiMessage, second: UiMessage): boolean {
   return (
     first.id === second.id &&
