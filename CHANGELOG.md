@@ -136,6 +136,7 @@ Docs: https://docs.openclaw.ai
 - Media/downloads: stop forwarding auth and cookie headers across cross-origin redirects during media saves, while preserving safe request headers for same-origin redirect chains. Thanks @AntAISecurityLab and @vincentkoc.
 - Doctor/plugins: skip false Matrix legacy-helper warnings when no migration plans exist, and keep bundled `enabledByDefault` plugins in the gateway startup set. (#57931) Thanks @dinakars777.
 - Zalo/webhooks: scope replay dedupe to the authenticated target so one configured account can no longer cause same-id inbound events for another target to be dropped. Thanks @smaeljaish771 and @vincentkoc.
+- Exec approvals/macOS: unwrap `arch` and `xcrun` before deriving shell payloads and allow-always patterns, so wrapper approvals stay bound to the carried command instead of the outer carrier. Thanks @tdjackey and @vincentkoc.
 - Matrix/CLI send: start one-off Matrix send clients before outbound delivery so `openclaw message send --channel matrix` restores E2EE in encrypted rooms instead of sending plain events. (#57936) Thanks @gumadeiras.
 - xAI/Responses: normalize image-bearing tool results for xAI responses payloads, including OpenResponses-style `input_image.source` parts, so image tool replays no longer 422 on the follow-up turn. (#58017) Thanks @neeravmakwana.
 - Cron/isolated sessions: carry the full live-session provider, model, and auth-profile selection across retry restarts so cron jobs with model overrides no longer fail or loop on mid-run model-switch requests. (#57972) Thanks @issaba1.
@@ -147,6 +148,7 @@ Docs: https://docs.openclaw.ai
 - Matrix/direct rooms: recover fresh auto-joined 1:1 DMs without eagerly persisting invite-only `m.direct` mappings, while keeping named, aliased, and explicitly configured rooms on the room path. (#58024) Thanks @gumadeiras.
 - TTS: Restore 3.28 schema compatibility and fallback observability. (#57953) Thanks @joshavant.
 - Memory/doctor: probe QMD availability from the agent workspace too, so `openclaw doctor` no longer falsely reports relative `memory.qmd.command` configs as broken while runtime search still works. Thanks @vincentkoc.
+- ACP/security: replace ACP's dangerous-tool name override with semantic approval classes, so only narrow readonly reads/searches can auto-approve while indirect exec-capable and control-plane tools always require explicit prompt approval. Thanks @vincentkoc.
 - Telegram/forum topics: restore reply routing to the active topic and keep ACP `sessions_spawn(..., thread=true, mode="session")` bound to that same topic instead of falling back to root chat or losing follow-up routing. (#56060) Thanks @one27001.
 - Config/SecretRef + Control UI: harden SecretRef redaction round-trip restore, block unsafe raw fallback (force Form mode when raw is unavailable), and preflight submitted-config SecretRefs before config write RPC persistence. (#58044) Thanks @joshavant.
 - Config/Telegram: migrate removed `channels.telegram.groupMentionsOnly` into `channels.telegram.groups["*"].requireMention` on load so legacy configs no longer crash at startup. (#55336) thanks @jameslcowan.
@@ -155,6 +157,7 @@ Docs: https://docs.openclaw.ai
 - Pairing: enforce pending request limits per account instead of per shared channel queue, so one account's outstanding pairing challenges no longer block new pairing on other accounts. Thanks @smaeljaish771 and @vincentkoc.
 - Exec approvals: unwrap `caffeinate` and `sandbox-exec` before persisting allow-always trust so later shell payload changes still require a fresh approval. Thanks @tdjackey and @vincentkoc.
 - Matrix/DM threads: keep strict unnamed fresh-invite rooms promotable even when Matrix omits the optional direct hint, preserve repair-failed local DM promotions while still revalidating later room metadata, and keep both bound and thread-isolated Matrix sessions reporting the correct route policy. (#58099) Thanks @gumadeiras.
+- ClawFlow: add a small flow runtime substrate for authoring layers with persisted wait targets and output bags, plus bundled skills/Lobster examples and richer `flows show` / `doctor` recovery hints for multi-task flow state. (#58336) Thanks @mbelinky.
 
 ## 2026.3.28
 
