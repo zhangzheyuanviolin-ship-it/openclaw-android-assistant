@@ -125,6 +125,7 @@ jobs:
           except Exception:
               date_str = published
 
+          body = body.replace("\r\n", "\n").replace("\r", "\n")
           lines = body.split("\n")
           out = []
           bullet_count = 0
@@ -146,11 +147,11 @@ jobs:
                   else:
                       continue
 
-              bm = re.match(r"^\*\s+(.*)", line)
+              bm = re.match(r"^[-*]\s+(.*)", line)
               if bm and in_section and bullet_count < 60:
                   item = bm.group(1).strip()
                   item = re.sub(r"\(#\d+\)", "", item)
-                  item = re.sub(r"Thanks @\S+\.?", "", item)
+                  item = re.sub(r"[Tt]hanks @\S+\.?", "", item)
                   item = re.sub(r"\s+", " ", item).strip().rstrip(".")
                   if item:
                       out.append(f"<li>{html.escape(item)}</li>")
