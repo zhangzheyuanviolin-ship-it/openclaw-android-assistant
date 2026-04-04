@@ -506,6 +506,7 @@ Options:
   `minimax-global-oauth`, `minimax-global-api`, `minimax-cn-oauth`, `minimax-cn-api`,
   `opencode-zen`, `opencode-go`, `github-copilot`, `copilot-proxy`, `xai-api-key`,
   `mistral-api-key`, `volcengine-api-key`, `byteplus-api-key`, `qianfan-api-key`,
+  `qwen-standard-api-key-cn`, `qwen-standard-api-key`, `qwen-api-key-cn`, `qwen-api-key`,
   `modelstudio-standard-api-key-cn`, `modelstudio-standard-api-key`,
   `modelstudio-api-key-cn`, `modelstudio-api-key`, `custom-api-key`, `skip`
 - `--secret-input-mode <plaintext|ref>` (default `plaintext`; use `ref` to store provider default env refs instead of plaintext keys)
@@ -1452,6 +1453,11 @@ Subcommands:
 - `gateway install|uninstall|start|stop|restart`
 - `gateway run`
 
+Notes:
+
+- `gateway status --deep` adds a system-level service scan. Use `gateway probe`,
+  `health --verbose`, or top-level `status --deep` for deeper runtime probe detail.
+
 Common RPCs:
 
 - `config.set` (validate + write full config; use `baseHash` for optimistic concurrency)
@@ -1472,7 +1478,7 @@ at 12:00 PM PT / 8:00 PM BST**. Anthropic says Claude subscription limits no
 longer cover OpenClaw, and Claude CLI usage in OpenClaw now requires **Extra
 Usage** billed separately from the subscription. For production, prefer an
 Anthropic API key or another supported subscription-style provider such as
-OpenAI Codex, Alibaba Cloud Model Studio Coding Plan, MiniMax Coding Plan, or
+OpenAI Codex, Qwen Cloud Coding Plan, MiniMax Coding Plan, or
 Z.AI / GLM Coding Plan.
 
 Anthropic Claude CLI migration:

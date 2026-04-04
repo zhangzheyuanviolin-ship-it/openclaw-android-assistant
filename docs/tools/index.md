@@ -39,9 +39,10 @@ OpenClaw has three layers that work together:
 
   <Step title="Plugins package everything together">
     A plugin is a package that can register any combination of capabilities:
-    channels, model providers, tools, skills, speech, image generation, and more.
-    Some plugins are **core** (shipped with OpenClaw), others are **external**
-    (published on npm by the community).
+    channels, model providers, tools, skills, speech, realtime transcription,
+    realtime voice, media understanding, image generation, video generation,
+    web fetch, web search, and more. Some plugins are **core** (shipped with
+    OpenClaw), others are **external** (published on npm by the community).
 
     [Install and configure plugins](/tools/plugin) | [Build your own](/plugins/building-plugins)
 
@@ -105,12 +106,12 @@ config. Deny always wins over allow.
 `tools.profile` sets a base allowlist before `allow`/`deny` is applied.
 Per-agent override: `agents.list[].tools.profile`.
 
-| Profile     | What it includes                            |
-| ----------- | ------------------------------------------- |
-| `full`      | All tools (default)                         |
-| `coding`    | File I/O, runtime, sessions, memory, image  |
-| `messaging` | Messaging, session list/history/send/status |
-| `minimal`   | `session_status` only                       |
+| Profile     | What it includes                                         |
+| ----------- | -------------------------------------------------------- |
+| `full`      | All tools (default)                                      |
+| `coding`    | Files, runtime, web, sessions, memory, cron, image tools |
+| `messaging` | Messaging, session list/history/send/status              |
+| `minimal`   | `session_status` only                                    |
 
 ### Tool groups
 
@@ -127,7 +128,16 @@ Use `group:*` shorthands in allow/deny lists:
 | `group:automation` | cron, gateway                                                                                             |
 | `group:messaging`  | message                                                                                                   |
 | `group:nodes`      | nodes                                                                                                     |
+| `group:agents`     | agents_list                                                                                               |
+| `group:media`      | image, image_generate, tts                                                                                |
 | `group:openclaw`   | All built-in OpenClaw tools (excludes plugin tools)                                                       |
+
+`sessions_history` returns a bounded, safety-filtered recall view. It strips
+thinking tags, `<relevant-memories>` scaffolding, plain-text tool-call XML
+payloads, downgraded tool-call scaffolding, leaked model control tokens, and
+malformed MiniMax tool-call XML from assistant text, then applies
+redaction/truncation and possible oversized-row placeholders instead of acting
+as a raw transcript dump.
 
 ### Provider-specific restrictions
 

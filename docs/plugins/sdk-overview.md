@@ -224,7 +224,7 @@ explicitly promotes one as public.
     | --- | --- |
     | `plugin-sdk/media-runtime` | Shared media fetch/transform/store helpers plus media payload builders |
     | `plugin-sdk/media-understanding-runtime` | Media-understanding runner facade and typed result helpers |
-    | `plugin-sdk/text-runtime` | Shared text, markdown, logging, and formatting helpers |
+    | `plugin-sdk/text-runtime` | Shared text/markdown/logging helpers such as assistant-visible-text stripping, markdown render/chunking/table helpers, redaction helpers, directive-tag helpers, and safe-text utilities |
     | `plugin-sdk/text-chunking` | Outbound text chunking helper |
     | `plugin-sdk/speech-runtime` | Speech-core runtime facade for TTS resolution and synthesis |
     | `plugin-sdk/speech-core` | Shared speech provider types, registry, directive, and normalization helpers |
@@ -232,6 +232,9 @@ explicitly promotes one as public.
     | `plugin-sdk/realtime-voice` | Realtime voice provider types and registry helpers |
     | `plugin-sdk/image-generation` | Image generation provider types |
     | `plugin-sdk/image-generation-core` | Shared image-generation types, failover, auth, and registry helpers |
+    | `plugin-sdk/video-generation` | Video generation provider types |
+    | `plugin-sdk/video-generation-core` | Shared video-generation types, failover helpers, provider lookup, and model-ref parsing |
+    | `plugin-sdk/video-generation-runtime` | Shared runtime `generateVideo` / `listRuntimeVideoGenerationProviders` facade |
     | `plugin-sdk/media-understanding` | Media understanding provider types |
     | `plugin-sdk/speech` | Speech provider types |
     | `plugin-sdk/webhook-targets` | Webhook target registry and route-install helpers |
@@ -268,7 +271,7 @@ explicitly promotes one as public.
     | Line | `plugin-sdk/line`, `plugin-sdk/line-core`, `plugin-sdk/line-runtime`, `plugin-sdk/line-surface` | Bundled LINE helper/runtime surface |
     | IRC | `plugin-sdk/irc`, `plugin-sdk/irc-surface` | Bundled IRC helper surface |
     | Channel-specific helpers | `plugin-sdk/googlechat`, `plugin-sdk/zalouser`, `plugin-sdk/bluebubbles`, `plugin-sdk/bluebubbles-policy`, `plugin-sdk/mattermost`, `plugin-sdk/mattermost-policy`, `plugin-sdk/feishu-conversation`, `plugin-sdk/msteams`, `plugin-sdk/nextcloud-talk`, `plugin-sdk/nostr`, `plugin-sdk/tlon`, `plugin-sdk/twitch` | Bundled channel compatibility/helper seams |
-    | Provider-specific helpers | `plugin-sdk/openai`, `plugin-sdk/moonshot`, `plugin-sdk/modelstudio`, `plugin-sdk/modelstudio-definitions`, `plugin-sdk/provider-moonshot`, `plugin-sdk/together`, `plugin-sdk/amazon-bedrock`, `plugin-sdk/anthropic-vertex`, `plugin-sdk/cloudflare-ai-gateway`, `plugin-sdk/byteplus`, `plugin-sdk/chutes`, `plugin-sdk/deepseek`, `plugin-sdk/google`, `plugin-sdk/huggingface`, `plugin-sdk/kimi-coding`, `plugin-sdk/kilocode`, `plugin-sdk/minimax`, `plugin-sdk/mistral`, `plugin-sdk/nvidia`, `plugin-sdk/ollama`, `plugin-sdk/ollama-surface`, `plugin-sdk/opencode`, `plugin-sdk/opencode-go`, `plugin-sdk/qianfan`, `plugin-sdk/sglang`, `plugin-sdk/synthetic`, `plugin-sdk/venice`, `plugin-sdk/vllm`, `plugin-sdk/xai`, `plugin-sdk/volcengine` | Bundled provider-specific helper seams |
+    | Provider-specific helpers | `plugin-sdk/openai`, `plugin-sdk/moonshot`, `plugin-sdk/qwen`, `plugin-sdk/qwen-definitions`, `plugin-sdk/modelstudio`, `plugin-sdk/modelstudio-definitions`, `plugin-sdk/provider-moonshot`, `plugin-sdk/together`, `plugin-sdk/amazon-bedrock`, `plugin-sdk/anthropic-vertex`, `plugin-sdk/cloudflare-ai-gateway`, `plugin-sdk/byteplus`, `plugin-sdk/chutes`, `plugin-sdk/deepseek`, `plugin-sdk/google`, `plugin-sdk/huggingface`, `plugin-sdk/kimi-coding`, `plugin-sdk/kilocode`, `plugin-sdk/minimax`, `plugin-sdk/mistral`, `plugin-sdk/nvidia`, `plugin-sdk/ollama`, `plugin-sdk/ollama-surface`, `plugin-sdk/opencode`, `plugin-sdk/opencode-go`, `plugin-sdk/qianfan`, `plugin-sdk/sglang`, `plugin-sdk/synthetic`, `plugin-sdk/venice`, `plugin-sdk/vllm`, `plugin-sdk/xai`, `plugin-sdk/volcengine` | Bundled provider-specific helper seams; prefer canonical `qwen*`, keep `modelstudio*` as compatibility aliases |
     | Auth/plugin-specific helpers | `plugin-sdk/github-copilot-login`, `plugin-sdk/github-copilot-token`, `plugin-sdk/diagnostics-otel`, `plugin-sdk/diffs`, `plugin-sdk/llm-task`, `plugin-sdk/thread-ownership`, `plugin-sdk/voice-call` | Bundled feature/plugin helper seams |
   </Accordion>
 </AccordionGroup>
@@ -290,6 +293,8 @@ methods:
 | `api.registerRealtimeVoiceProvider(...)`         | Duplex realtime voice sessions   |
 | `api.registerMediaUnderstandingProvider(...)`    | Image/audio/video analysis       |
 | `api.registerImageGenerationProvider(...)`       | Image generation                 |
+| `api.registerVideoGenerationProvider(...)`       | Video generation                 |
+| `api.registerWebFetchProvider(...)`              | Web fetch / scrape provider      |
 | `api.registerWebSearchProvider(...)`             | Web search                       |
 
 ### Tools and commands
