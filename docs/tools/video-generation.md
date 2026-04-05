@@ -1,5 +1,5 @@
 ---
-summary: "Generate videos using configured providers such as OpenAI, Google, Qwen, and MiniMax"
+summary: "Generate videos using configured providers such as Alibaba, OpenAI, Google, Qwen, and MiniMax"
 read_when:
   - Generating videos via the agent
   - Configuring video generation providers and models
@@ -17,14 +17,16 @@ The tool only appears when at least one video-generation provider is available. 
 
 ## Quick start
 
-1. Set an API key for at least one provider (for example `OPENAI_API_KEY`, `GEMINI_API_KEY`, or `QWEN_API_KEY`).
+1. Set an API key for at least one provider (for example `OPENAI_API_KEY`, `GEMINI_API_KEY`, `MODELSTUDIO_API_KEY`, or `QWEN_API_KEY`).
 2. Optionally set your preferred model:
 
 ```json5
 {
   agents: {
     defaults: {
-      videoGenerationModel: "qwen/wan2.6-t2v",
+      videoGenerationModel: {
+        primary: "qwen/wan2.6-t2v",
+      },
     },
   },
 }
@@ -38,6 +40,7 @@ The agent calls `video_generate` automatically. No tool allow-listing needed —
 
 | Provider | Default model                   | Reference inputs   | API key                                                    |
 | -------- | ------------------------------- | ------------------ | ---------------------------------------------------------- |
+| Alibaba  | `wan2.6-t2v`                    | Yes, remote URLs   | `MODELSTUDIO_API_KEY`, `DASHSCOPE_API_KEY`, `QWEN_API_KEY` |
 | BytePlus | `seedance-1-0-lite-t2v-250428`  | 1 image            | `BYTEPLUS_API_KEY`                                         |
 | fal      | `fal-ai/minimax/video-01-live`  | 1 image            | `FAL_KEY`                                                  |
 | Google   | `veo-3.1-fast-generate-preview` | 1 image or 1 video | `GEMINI_API_KEY`, `GOOGLE_API_KEY`                         |
@@ -45,6 +48,7 @@ The agent calls `video_generate` automatically. No tool allow-listing needed —
 | OpenAI   | `sora-2`                        | 1 image or 1 video | `OPENAI_API_KEY`                                           |
 | Qwen     | `wan2.6-t2v`                    | Yes, remote URLs   | `QWEN_API_KEY`, `MODELSTUDIO_API_KEY`, `DASHSCOPE_API_KEY` |
 | Together | `Wan-AI/Wan2.2-T2V-A14B`        | 1 image            | `TOGETHER_API_KEY`                                         |
+| xAI      | `grok-imagine-video`            | 1 image or 1 video | `XAI_API_KEY`                                              |
 
 Use `action: "list"` to inspect available providers and models at runtime:
 
@@ -54,24 +58,24 @@ Use `action: "list"` to inspect available providers and models at runtime:
 
 ## Tool parameters
 
-| Parameter         | Type     | Description                                                                           |
-| ----------------- | -------- | ------------------------------------------------------------------------------------- |
-| `prompt`          | string   | Video generation prompt (required for `action: "generate"`)                           |
-| `action`          | string   | `"generate"` (default) or `"list"` to inspect providers                               |
-| `model`           | string   | Provider/model override, e.g. `qwen/wan2.6-t2v`                                       |
-| `image`           | string   | Single reference image path or URL                                                    |
-| `images`          | string[] | Multiple reference images (up to 5)                                                   |
-| `video`           | string   | Single reference video path or URL                                                    |
-| `videos`          | string[] | Multiple reference videos (up to 4)                                                   |
-| `size`            | string   | Size hint when the provider supports it                                               |
-| `aspectRatio`     | string   | Aspect ratio: `1:1`, `2:3`, `3:2`, `3:4`, `4:3`, `4:5`, `5:4`, `9:16`, `16:9`, `21:9` |
-| `resolution`      | string   | Resolution hint: `480P`, `720P`, or `1080P`                                           |
-| `durationSeconds` | number   | Target duration in seconds                                                            |
-| `audio`           | boolean  | Enable generated audio when the provider supports it                                  |
-| `watermark`       | boolean  | Toggle provider watermarking when supported                                           |
-| `filename`        | string   | Output filename hint                                                                  |
+| Parameter         | Type     | Description                                                                            |
+| ----------------- | -------- | -------------------------------------------------------------------------------------- |
+| `prompt`          | string   | Video generation prompt (required for `action: "generate"`)                            |
+| `action`          | string   | `"generate"` (default) or `"list"` to inspect providers                                |
+| `model`           | string   | Provider/model override, e.g. `qwen/wan2.6-t2v`                                        |
+| `image`           | string   | Single reference image path or URL                                                     |
+| `images`          | string[] | Multiple reference images (up to 5)                                                    |
+| `video`           | string   | Single reference video path or URL                                                     |
+| `videos`          | string[] | Multiple reference videos (up to 4)                                                    |
+| `size`            | string   | Size hint when the provider supports it                                                |
+| `aspectRatio`     | string   | Aspect ratio: `1:1`, `2:3`, `3:2`, `3:4`, `4:3`, `4:5`, `5:4`, `9:16`, `16:9`, `21:9`  |
+| `resolution`      | string   | Resolution hint: `480P`, `720P`, or `1080P`                                            |
+| `durationSeconds` | number   | Target duration in seconds. OpenClaw may round to the nearest provider-supported value |
+| `audio`           | boolean  | Enable generated audio when the provider supports it                                   |
+| `watermark`       | boolean  | Toggle provider watermarking when supported                                            |
+| `filename`        | string   | Output filename hint                                                                   |
 
-Not all providers support all parameters. The tool validates provider capability limits before it submits the request.
+Not all providers support all parameters. The tool validates provider capability limits before it submits the request. When a provider or model only supports a discrete set of video lengths, OpenClaw rounds `durationSeconds` to the nearest supported value and reports the normalized duration in the tool result.
 
 ## Configuration
 
@@ -105,10 +109,12 @@ If a provider fails, the next candidate is tried automatically. If all fail, the
 
 ## Provider notes
 
-- OpenAI uses the native video endpoint and currently defaults to `sora-2`.
+- Alibaba uses the DashScope / Model Studio async video endpoint and currently requires remote `http(s)` URLs for reference assets.
 - Google uses Gemini/Veo and supports a single image or video reference input.
 - MiniMax, Together, BytePlus, and fal currently support a single image reference input.
+- OpenAI uses the native video endpoint and currently defaults to `sora-2`.
 - Qwen supports image/video references, but the upstream DashScope video endpoint currently requires remote `http(s)` URLs for those references.
+- xAI uses the native xAI video API and supports text-to-video, image-to-video, and remote video edit/extend flows.
 
 ## Qwen reference inputs
 
@@ -117,6 +123,12 @@ The bundled Qwen provider supports text-to-video plus image/video reference mode
 ## Related
 
 - [Tools Overview](/tools) — all available agent tools
+- [Alibaba Model Studio](/providers/alibaba) — direct Wan provider setup
+- [Google (Gemini)](/providers/google) — Veo provider setup
+- [MiniMax](/providers/minimax) — Hailuo provider setup
+- [OpenAI](/providers/openai) — Sora provider setup
 - [Qwen](/providers/qwen) — Qwen-specific setup and limits
+- [Together AI](/providers/together) — Together Wan provider setup
+- [xAI](/providers/xai) — Grok video provider setup
 - [Configuration Reference](/gateway/configuration-reference#agent-defaults) — `videoGenerationModel` config
 - [Models](/concepts/models) — model configuration and failover
