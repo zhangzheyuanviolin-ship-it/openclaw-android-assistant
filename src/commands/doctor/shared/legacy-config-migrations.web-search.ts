@@ -1,18 +1,18 @@
 import {
-  listLegacyWebSearchConfigPaths,
-  migrateLegacyWebSearchConfig,
-} from "./legacy-web-search.js";
-import {
   defineLegacyConfigMigration,
   type LegacyConfigMigrationSpec,
   type LegacyConfigRule,
-} from "./legacy.shared.js";
+} from "../../../config/legacy.shared.js";
+import {
+  listLegacyWebSearchConfigPaths,
+  migrateLegacyWebSearchConfig,
+} from "./legacy-web-search-migrate.js";
 
 const LEGACY_WEB_SEARCH_RULES: LegacyConfigRule[] = [
   {
     path: ["tools", "web", "search"],
     message:
-      "tools.web.search provider-owned config moved to plugins.entries.<plugin>.config.webSearch (auto-migrated on load).",
+      'tools.web.search provider-owned config moved to plugins.entries.<plugin>.config.webSearch. Run "openclaw doctor --fix".',
     match: (_value, root) => listLegacyWebSearchConfigPaths(root).length > 0,
     requireSourceLiteral: true,
   },

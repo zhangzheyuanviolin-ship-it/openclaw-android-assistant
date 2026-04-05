@@ -15,9 +15,11 @@ OpenAI explicitly supports subscription OAuth usage in external tools/workflows 
 ## Default interaction style
 
 OpenClaw can add a small OpenAI-specific prompt overlay for both `openai/*` and
-`openai-codex/*` runs. When enabled, the overlay keeps the assistant warm,
+`openai-codex/*` runs. By default, the overlay keeps the assistant warm,
 collaborative, concise, direct, and a little more emotionally expressive
-without replacing the base OpenClaw system prompt.
+without replacing the base OpenClaw system prompt. The friendly overlay also
+permits the occasional emoji when it fits naturally, while keeping overall
+output concise.
 
 Config key:
 
@@ -25,8 +27,8 @@ Config key:
 
 Allowed values:
 
-- `"friendly"`: enable the OpenAI-specific overlay.
-- `"off"`: default; disable the overlay and use the base OpenClaw prompt only.
+- `"friendly"`: default; enable the OpenAI-specific overlay.
+- `"off"`: disable the overlay and use the base OpenClaw prompt only.
 
 Scope:
 
@@ -34,8 +36,8 @@ Scope:
 - Applies to `openai-codex/*` models.
 - Does not affect other providers.
 
-This behavior is off by default. Enable it explicitly if you want the OpenAI
-personality overlay:
+This behavior is on by default. Keep `"friendly"` explicitly if you want that
+to survive future local config churn:
 
 ```json5
 {
@@ -53,7 +55,7 @@ personality overlay:
 
 ### Disable the OpenAI prompt overlay
 
-If you want the unmodified base OpenClaw prompt, keep the overlay off:
+If you want the unmodified base OpenClaw prompt, set the overlay to `"off"`:
 
 ```json5
 {

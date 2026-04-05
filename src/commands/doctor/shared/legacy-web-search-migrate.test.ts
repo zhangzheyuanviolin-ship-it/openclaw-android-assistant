@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { OpenClawConfig } from "./config.js";
-import { migrateLegacyConfig } from "./legacy-migrate.js";
+import type { OpenClawConfig } from "../../../config/config.js";
+import { findLegacyConfigIssues } from "../../../config/legacy.js";
+import { migrateLegacyConfig } from "./legacy-config-migrate.js";
 import {
   listLegacyWebSearchConfigPaths,
   migrateLegacyWebSearchConfig,
-} from "./legacy-web-search.js";
-import { findLegacyConfigIssues } from "./legacy.js";
+} from "./legacy-web-search-migrate.js";
 
 describe("legacy web search config", () => {
   it("migrates legacy provider config through bundled web search ownership metadata", () => {
@@ -108,7 +108,7 @@ describe("legacy web search config", () => {
       {
         path: "tools.web.search",
         message:
-          "tools.web.search provider-owned config moved to plugins.entries.<plugin>.config.webSearch (auto-migrated on load).",
+          'tools.web.search provider-owned config moved to plugins.entries.<plugin>.config.webSearch. Run "openclaw doctor --fix".',
       },
     ]);
 
