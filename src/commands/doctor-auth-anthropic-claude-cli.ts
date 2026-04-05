@@ -10,6 +10,7 @@ import type { DoctorPrompter } from "./doctor-prompter.js";
 const ANTHROPIC_PROVIDER_ID = "anthropic";
 const CLAUDE_CLI_PROVIDER_ID = "claude-cli";
 const CLAUDE_CLI_PROFILE_ID = "anthropic:claude-cli";
+type AgentDefaultsConfig = NonNullable<NonNullable<OpenClawConfig["agents"]>["defaults"]>;
 
 function trimOptionalString(value: unknown): string | undefined {
   if (typeof value !== "string") {
@@ -306,15 +307,6 @@ function rewriteAnthropicClaudeCliConfig(params: {
   const rewrittenModel = rewriteModelSelection(defaults?.model);
   const rewrittenModels = rewriteModelMap(defaults?.models);
 
-  let nextCliBackends = defaults?.cliBackends;
-  let cliBackendsChanged = false;
-  if (nextCliBackends?.[CLAUDE_CLI_PROVIDER_ID]) {
-    const clone = { ...nextCliBackends };
-    delete clone[CLAUDE_CLI_PROVIDER_ID];
-    nextCliBackends = Object.keys(clone).length > 0 ? clone : undefined;
-    cliBackendsChanged = true;
-  }
-
   if (rewrittenProfiles.changed) {
     changes.push("removed stale Anthropic Claude CLI auth-profile config");
   }
@@ -324,20 +316,14 @@ function rewriteAnthropicClaudeCliConfig(params: {
   if (rewrittenModel.changed || rewrittenModels.changed) {
     changes.push("rewrote claude-cli model refs back to anthropic/*");
   }
-  if (cliBackendsChanged) {
-    changes.push("removed agents.defaults.cliBackends.claude-cli");
-  }
-
   if (changes.length === 0) {
     return { next: params.cfg, changes };
   }
 
   const nextProfiles = rewrittenProfiles.value;
   const nextOrder = rewrittenOrder.value;
-  const nextModel = rewrittenModel.value as OpenClawConfig["agents"]["defaults"]["model"];
-  const nextModels = rewrittenModels.value as OpenClawConfig["agents"]["defaults"]["models"];
-  const nextCliBackendsTyped =
-    nextCliBackends as OpenClawConfig["agents"]["defaults"]["cliBackends"];
+  const nextModel = rewrittenModel.value as AgentDefaultsConfig["model"];
+  const nextModels = rewrittenModels.value as AgentDefaultsConfig["models"];
 
   const nextAuth =
     nextProfiles || nextOrder || params.cfg.auth?.cooldowns
@@ -351,12 +337,11 @@ function rewriteAnthropicClaudeCliConfig(params: {
       : undefined;
 
   const nextDefaults =
-    rewrittenModel.changed || rewrittenModels.changed || cliBackendsChanged
+    rewrittenModel.changed || rewrittenModels.changed
       ? {
           ...defaults,
           ...(rewrittenModel.changed ? { model: nextModel } : {}),
           ...(rewrittenModels.changed ? { models: nextModels } : {}),
-          ...(cliBackendsChanged ? { cliBackends: nextCliBackendsTyped } : {}),
         }
       : defaults;
 
@@ -484,7 +469,7 @@ function hasStaleAnthropicClaudeCliConfig(cfg: OpenClawConfig): boolean {
   ) {
     return true;
   }
-  return Boolean(defaults?.cliBackends?.[CLAUDE_CLI_PROVIDER_ID]);
+  return false;
 }
 
 export async function maybeRepairRemovedAnthropicClaudeCliState(
