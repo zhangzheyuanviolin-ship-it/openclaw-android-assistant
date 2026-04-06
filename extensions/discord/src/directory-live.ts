@@ -82,7 +82,7 @@ export async function listDiscordDirectoryPeersLive(
   if (!access) {
     return [];
   }
-  const { token, query } = access;
+  const { token, query, accountId } = access;
   if (!query) {
     return [];
   }
