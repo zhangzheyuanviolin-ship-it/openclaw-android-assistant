@@ -100,7 +100,7 @@ function normalizeBundledChannelConfigs(
       continue;
     }
     next ??= { ...value };
-    next[channelId] = parsed.data;
+    next[channelId] = parsed.data as ChannelsConfig[string];
   }
 
   return next ?? value;
@@ -122,5 +122,5 @@ export const ChannelsSchema: z.ZodType<ChannelsConfig | undefined> = z
   .superRefine((value, ctx) => {
     addLegacyChannelAcpBindingIssues(value, ctx);
   })
-  .transform((value, ctx) => normalizeBundledChannelConfigs(value, ctx))
+  .transform((value, ctx) => normalizeBundledChannelConfigs(value as ChannelsConfig, ctx))
   .optional() as z.ZodType<ChannelsConfig | undefined>;
