@@ -1,8 +1,8 @@
 name: Sync Upstream
 
 on:
-  schedule:
-    - cron: '0 */1 * * *'
+  # schedule: disabled 2026-07-08 - automated upstream sync was causing hourly failure emails
+  # - cron: '0 */1 * * *'
   workflow_dispatch:
 
 jobs:
